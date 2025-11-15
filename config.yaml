@@ -1,0 +1,133 @@
+# Swing Quant Local 配置文件
+# 支持 Dify 风格的模型配置
+
+# ==================== LLM 基础配置 ====================
+llm:
+  provider: "openai"  # openai, anthropic, deepseek, custom
+  api_key: "your-api-key-here"  # 替换为您的 API Key
+  base_url: "https://api.openai.com/v1"  # 或 https://www.dmxapi.cn/v1
+
+# ==================== 模型选择（各 Agent 可独立配置）====================
+models:
+  router: "gpt-4o-mini"           # Agent 1: 路由判断
+  command_gen: "gpt-4o-mini"      # Agent 2: 命令清单生成
+  data_validator: "gpt-4o"        # Agent 3: 数据校验（需视觉能力）
+  technical: "gpt-4o"             # Agent 4: 技术面分析（需视觉能力）
+  scenario: "gpt-4o"              # Agent 5: 剧本分析
+  strategy: "gpt-4o"              # Agent 6: 策略生成
+  comparison: "gpt-4o"            # Agent 7: 策略对比
+  report: "gpt-4o"                # Agent 8: 报告生成
+
+# ==================== 模型通用参数 ====================
+model_params:
+  temperature: 0.5                # 创造性 (0-1)
+  max_tokens: 4096                # 单次输出最大 token
+  context_length: 4096            # 上下文窗口长度
+  max_output_tokens: 4096         # 最大输出 token（与 max_tokens 通常相同）
+  top_p: 1.0                      # 核采样参数
+  frequency_penalty: 0.0          # 频率惩罚
+  presence_penalty: 0.0           # 存在惩罚
+
+# ==================== 模型能力配置 ====================
+model_capabilities:
+  # Agent Thought（链式思考）
+  agent_thought: false            # 不支持 | 支持
+  
+  # Function Calling（工具调用）
+  function_calling: "tool_call"   # tool_call | function | none
+  
+  # Stream Function Calling（流式工具调用）
+  stream_function_calling: true   # true | false
+  
+  # Vision 支持
+  vision_support: true            # true | false（gpt-4o 支持，gpt-4o-mini 不支持）
+  
+  # Structured Output（结构化输出）
+  structured_output: true         # true | false
+  
+  # Stream Mode Auth（流模式认证）
+  stream_mode_auth: "none"        # none | basic | bearer
+  
+  # 流模式返回结果分隔符
+  stream_delimiter: "\n\n"        # 默认 \n\n
+  
+  # Completion Mode（补全模式）
+  completion_mode: "chat"         # chat | completion
+
+# ==================== 量化参数配置 ====================
+environment_variables:
+  # === 评分权重 ===
+  - name: SCORE_WEIGHT_GAMMA_REGIME
+    value: 0.4
+  - name: SCORE_WEIGHT_BREAK_WALL
+    value: 0.3
+  - name: SCORE_WEIGHT_DIRECTION
+    value: 0.2
+  - name: SCORE_WEIGHT_IV
+    value: 0.1
+  
+  # === 破墙阈值 ===
+  - name: BREAK_WALL_THRESHOLD_LOW
+    value: 0.4
+  - name: BREAK_WALL_THRESHOLD_HIGH
+    value: 0.8
+  - name: CLUSTER_STRENGTH_THRESHOLD_STRONG
+    value: 2.0
+  
+  # === DEX 方向阈值 ===
+  - name: DEX_SAME_DIR_THRESHOLD_STRONG
+    value: 70
+  - name: DEX_SAME_DIR_THRESHOLD_MEDIUM
+    value: 60
+  
+  # === Alpha Vantage API ===
+  - name: ENABLE_EARNINGS_API
+    value: true
+  - name: ALPHA_VANTAGE_API_KEY
+    value: "TKV2HLJJYKSRGR"  # 替换为您的 Key
+  - name: EARNINGS_CACHE_DAYS
+    value: 30
+  
+  # === 风险管理 ===
+  - name: MAX_SINGLE_RISK_PCT
+    value: 2
+  - name: ENTRY_THRESHOLD_SCORE
+    value: 3
+  
+  # === 其他参数（可根据需要添加）===
+  # 完整列表请参考 config.py
+
+# ==================== 批量分析配置 ====================
+batch_analysis:
+  # 并行处理数量（同时分析的标的数）
+  max_workers: 3
+  
+  # 失败重试次数
+  retry_attempts: 2
+  
+  # 超时时间（秒）
+  timeout_per_symbol: 300
+  
+  # 是否生成个股详细报告
+  generate_individual_reports: true
+  
+  # 是否在失败时继续
+  continue_on_error: true
+
+# ==================== 日志配置 ====================
+logging:
+  level: INFO                     # DEBUG | INFO | WARNING | ERROR
+  file: swing_quant.log
+  console: true
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# ==================== 输出配置 ====================
+output:
+  # 报告格式
+  format: markdown                # markdown | json | html
+  
+  # 是否包含详细数据
+  include_raw_data: false
+  
+  # 是否生成图表
+  generate_charts: false
