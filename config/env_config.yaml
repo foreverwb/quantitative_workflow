@@ -1,0 +1,256 @@
+# ========================================
+# 环境变量配置文件
+# 从 Workflow 系统变量迁移而来
+# ========================================
+
+# ======================================
+# 1. Gamma 状态判定参数
+# ======================================
+gamma:
+  # EM1$ 计算因子 sqrt(1/252)
+  em1_sqrt_factor: 0.06299
+  
+  # 破墙判定阈值
+  break_wall_threshold_low: 0.4      # gap < 0.4×EM1$ 高破墙概率
+  break_wall_threshold_high: 0.8     # gap > 0.8×EM1$ 低破墙概率
+  
+  # 月度簇判定
+  monthly_override_threshold: 0.7    # 月度簇强度 ≥ 周度×0.7 时覆盖
+  monthly_cluster_strength_ratio: 1.5
+  
+  # 簇强度阈值
+  cluster_strength_threshold_t: 1.2  # 趋势级别
+  cluster_strength_threshold_s: 2.0  # 极强级别
+  
+  # 墙识别参数
+  wall_cluster_width: 3              # 簇宽度 ≥ 3 个相邻行权价
+  wall_peak_multiplier: 2.0          # 局部峰 ≥ 相邻γ中位数 2 倍
+
+# ======================================
+# 2. 方向信号阈值
+# ======================================
+direction:
+  # DEX 同向阈值
+  dex_same_dir_threshold_strong: 70  # ≥70% 强方向
+  dex_same_dir_threshold_medium: 60  # ≥60% 中等方向
+  dex_same_dir_threshold_weak: 50    # ≥50% 弱方向
+  
+  # IV 路径阈值
+  iv_path_threshold_vol: 2           # 绝对变化 ≥ 2 vol点
+  iv_path_threshold_pct: 10          # 相对变化 ≥ 10%
+  iv_noise_threshold: 30             # 7D与14D差异 >30% 视为噪音
+
+# ======================================
+# 3. DTE（到期日）选择逻辑
+# ======================================
+dte:
+  # Gap 距离阈值（× EM1$）
+  gap_high_threshold: 3              # gap > 3×EM1$ 选择长DTE
+  gap_mid_threshold: 2               # gap 在 2-3×EM1$ 中等DTE
+  
+  # 默认 DTE 值
+  default_weekly_short: 7            # 周度短期
+  default_weekly_mid: 14             # 周度中期
+  default_monthly_short: 30          # 月度短期
+  default_monthly_mid: 60            # 月度中期（无周度数据时使用）
+  
+  # 月度调整
+  monthly_adjustment: 7              # 月度簇时 DTE+7天
+
+# ======================================
+# 4. 行权价偏移（× EM1$）
+# ======================================
+strikes:
+  # 保守策略
+  conservative_long_offset: 1.5      # Long腿距Short腿 1.5×EM1$
+  
+  # 均衡策略
+  balanced_wing_offset: 1.0          # Wing距Body 1.0×EM1$
+  
+  # 进取策略
+  aggressive_long_offset: 0.2        # Long腿距现价 0.2×EM1$
+  
+  # 比率价差
+  ratio_short_offset: 0.5            # Short腿偏移
+  ratio_long_offset: 1.5             # Long腿偏移
+
+# ======================================
+# 5. 价差宽度（× EM1$）
+# ======================================
+spreads:
+  # 信用价差
+  credit_min_width: 0.8
+  credit_max_width: 1.0
+  
+  # 借贷价差
+  debit_min_width: 1.0
+  debit_max_width: 1.2
+
+# ======================================
+# 6. RR（风险回报比）计算 - IVR 映射
+# ======================================
+rr_calculation:
+  # 信用价差 credit_ratio
+  credit_ivr:
+    "0-25": 0.20                     # IVR 0-25%
+    "25-50": 0.30                    # IVR 25-50%
+    "50-75": 0.40                    # IVR 50-75%
+    "75-100": 0.50                   # IVR 75-100%
+  
+  # 借贷价差 debit_ratio
+  debit_ivr:
+    "0-40": 0.30
+    "40-70": 0.40
+    "70-100": 0.50
+
+# ======================================
+# 7. Pw（胜率）计算参数
+# ======================================
+pw_calculation:
+  # 信用策略 Pw
+  credit:
+    base: 0.5                        # 基础胜率
+    cluster_coef: 0.1                # 簇强度系数
+    distance_penalty_coef: 0.05      # 距离惩罚系数
+    min: 0.4                         # 最小值
+    max: 0.85                        # 最大值
+  
+  # 借贷策略 Pw
+  debit:
+    base: 0.3
+    dex_coef: 0.1                    # DEX 调整系数
+    vanna_coef: 0.2                  # Vanna 调整系数
+    min: 0.25
+    max: 0.75
+  
+  # 蝶式策略 Pw
+  butterfly:
+    body_inside: 0.65                # spot 在 body 内
+    body_offset_1em: 0.45            # 偏离 1×EM1$
+
+# ======================================
+# 8. Greeks 目标范围
+# ======================================
+greeks:
+  # 保守策略（接近中性）
+  conservative:
+    delta_min: -0.1
+    delta_max: 0.1
+    theta_min: 5.0                   # 每日Theta收益 ≥ 5
+    vega_max: -10.0                  # 做空波动率
+  
+  # 均衡策略
+  balanced:
+    delta_range: 0.2                 # Delta 在 ±0.2
+    theta_min: 8.0
+  
+  # 进取策略（明确方向）
+  aggressive:
+    delta_min: 0.3
+    delta_max: 0.6
+    vega_min: 10.0                   # 做多波动率
+
+# ======================================
+# 9. 止盈止损参数
+# ======================================
+exit_rules:
+  # 信用策略
+  credit:
+    profit_target_pct: 30            # 权利金衰减至 30% 止盈
+    stop_loss_pct: 150               # 浮亏达 150% 止损
+    time_decay_exit_days: 3          # 到期前 3 日强制平仓
+  
+  # 借贷策略
+  debit:
+    profit_target_pct: 60            # 浮盈 60% 止盈
+    stop_loss_pct: 50                # 亏损 50% 止损
+    time_decay_exit_days: 3
+
+# ======================================
+# 10. 评分权重配置
+# ======================================
+scoring:
+  # 四维评分权重（总和必须为 1.0）
+  weight_gamma_regime: 0.4           # Gamma状态权重
+  weight_break_wall: 0.3             # 破墙可能性权重
+  weight_direction: 0.2              # 方向一致性权重
+  weight_iv: 0.1                     # IV动态权重
+  
+  # 入场阈值
+  entry_threshold_score: 3           # 总评分 ≥ 3分
+  entry_threshold_probability: 60    # 主导场景概率 ≥ 60%
+  light_position_probability: 50     # 轻仓试探概率下限
+  technical_score_max: 2             # 技术面最高 2分
+
+# ======================================
+# 11. 风险管理
+# ======================================
+risk_management:
+  max_single_risk_pct: 2             # 单笔风险 ≤ 账户2%
+  max_total_exposure_pct: 10         # 总敞口 ≤ 账户10%
+
+# ======================================
+# 12. Alpha Vantage API 配置
+# ======================================
+alpha_vantage:
+  api_url: "https://www.alphavantage.co/query?"
+  api_key: "TKV2HLJJYKSRGR"          # ⚠️ 建议从环境变量读取
+  enable_earnings_api: true          # 是否启用财报API
+  earnings_cache_days: 30            # 财报缓存天数
+
+# ======================================
+# 13. 数据抓取默认值
+# ======================================
+data_fetching:
+  default_strikes: 25                # 默认行权价数量
+  default_net_window: 60             # 净Gamma窗口（天）
+  extended_net_window: 120           # 扩展窗口
+  default_index_primary: "SPX"       # 主要指数
+  default_index_secondary: "QQQ"     # 次要指数
+
+# ======================================
+# 14. 环境变量别名映射（兼容旧代码）
+# ======================================
+# 以下是扁平化访问的别名，用于向后兼容
+aliases:
+  EM1_SQRT_FACTOR: gamma.em1_sqrt_factor
+  BREAK_WALL_THRESHOLD_LOW: gamma.break_wall_threshold_low
+  BREAK_WALL_THRESHOLD_HIGH: gamma.break_wall_threshold_high
+  MONTHLY_OVERRIDE_THRESHOLD: gamma.monthly_override_threshold
+  MONTHLY_CLUSTER_STRENGTH_RATIO: gamma.monthly_cluster_strength_ratio
+  CLUSTER_STRENGTH_THRESHOLD_T: gamma.cluster_strength_threshold_t
+  CLUSTER_STRENGTH_THRESHOLD_S: gamma.cluster_strength_threshold_s
+  WALL_CLUSTER_WIDTH: gamma.wall_cluster_width
+  WALL_PEAK_MULTIPLIER: gamma.wall_peak_multiplier
+  
+  DEX_SAME_DIR_THRESHOLD_STRONG: direction.dex_same_dir_threshold_strong
+  DEX_SAME_DIR_THRESHOLD_MEDIUM: direction.dex_same_dir_threshold_medium
+  DEX_SAME_DIR_THRESHOLD_WEAK: direction.dex_same_dir_threshold_weak
+  IV_PATH_THRESHOLD_VOL: direction.iv_path_threshold_vol
+  IV_PATH_THRESHOLD_PCT: direction.iv_path_threshold_pct
+  IV_NOISE_THRESHOLD: direction.iv_noise_threshold
+  
+  DEFAULT_DTE_WEEKLY_SHORT: dte.default_weekly_short
+  DEFAULT_DTE_WEEKLY_MID: dte.default_weekly_mid
+  DEFAULT_DTE_MONTHLY_SHORT: dte.default_monthly_short
+  DEFAULT_DTE_MONTHLY_MID: dte.default_monthly_mid
+  
+  SCORE_WEIGHT_GAMMA_REGIME: scoring.weight_gamma_regime
+  SCORE_WEIGHT_BREAK_WALL: scoring.weight_break_wall
+  SCORE_WEIGHT_DIRECTION: scoring.weight_direction
+  SCORE_WEIGHT_IV: scoring.weight_iv
+  ENTRY_THRESHOLD_SCORE: scoring.entry_threshold_score
+  ENTRY_THRESHOLD_PROBABILITY: scoring.entry_threshold_probability
+  
+  ALPHA_VANTAGE_API_KEY: alpha_vantage.api_key
+  ALPHA_VANTAGE_API_URL: alpha_vantage.api_url
+  
+  MAX_SINGLE_RISK_PCT: risk_management.max_single_risk_pct
+  MAX_TOTAL_EXPOSURE_PCT: risk_management.max_total_exposure_pct
+
+# ========================================
+# 注意事项
+# ========================================
+# 1. 会话变量（conversation_variables）已内置在 WorkflowEngine.conversation_vars 中
+# 2. 模型配置已独立至 config/model_config.yaml
+# 3. API Key 建议通过环境变量设置，避免直接写在配置文件中
