@@ -4,20 +4,27 @@ from typing import Dict, Any, Optional
 
 def main(agent3_output: dict, agent5_output: dict, technical_score: float = 0, **env_vars) -> dict:
     """
-    Agent 6 策略计算辅助函数
+    Agent 6 策略计算辅助函数（修复版）
     
-    Args:
-        agent3_output: Agent 3 的数据校验结果 JSON
-        agent5_output: Agent 5 的剧本分析结果 JSON
-        technical_score: 技术面评分(0-2)
-        **env_vars: 环境变量字典
-        
-    Returns:
-        {"result": 策略计算辅助结果 JSON 字符串}
+    ✅ 修复点：
+    1. 添加环境变量默认值处理
+    2. 添加 None 值检查
+    3. 修复数据提取逻辑
     """
     try:
-        agent3_data = agent3_output
-        agent5_data = agent5_output
+        # ✅ 修复 1: 安全解析输入
+        if isinstance(agent3_output, str):
+            agent3_data = json.loads(agent3_output)
+        else:
+            agent3_data = agent3_output
+        
+        if isinstance(agent5_output, str):
+            agent5_data = json.loads(agent5_output)
+        else:
+            agent5_data = agent5_output
+        
+        print(f"📥 [CODE3] agent3_output 类型: {type(agent3_output)}")
+        print(f"📥 [CODE3] agent5_output 类型: {type(agent5_output)}")
         
         calculator = StrategyCalculator(env_vars)
         result = calculator.process(agent3_data, agent5_data, technical_score)
@@ -27,23 +34,27 @@ def main(agent3_output: dict, agent5_output: dict, technical_score: float = 0, *
         }
         
     except Exception as e:
+        import traceback
+        print(f"\n❌ [CODE3] 执行异常:")
+        print(traceback.format_exc())
         return {
             "result": json.dumps({
                 "error": True,
-                "error_message": str(e)
+                "error_message": str(e),
+                "error_traceback": traceback.format_exc()
             }, ensure_ascii=False, indent=2)
         }
 
 
 class StrategyCalculator:
-    """策略计算引擎"""
+    """策略计算引擎（修复版）"""
     
     def __init__(self, env_vars: Dict[str, Any]):
-        """初始化环境变量"""
+        """初始化环境变量（添加默认值保护）"""
         self.env = self._parse_env_vars(env_vars)
     
     def _parse_env_vars(self, env_vars: Dict[str, Any]) -> Dict[str, float]:
-        """解析环境变量并设置默认值"""
+        """解析环境变量并设置默认值（修复版）"""
         defaults = {
             # Greeks 目标范围
             'CONSERVATIVE_DELTA_MIN': -0.1,
@@ -67,12 +78,6 @@ class StrategyCalculator:
             'STRIKE_RATIO_SHORT_OFFSET': 0.5,
             'STRIKE_RATIO_LONG_OFFSET': 1.5,
             'STRIKE_AGGRESSIVE_LONG_OFFSET': 0.2,
-            
-            # 价差宽度
-            'WIDTH_CREDIT_MIN': 0.8,
-            'WIDTH_CREDIT_MAX': 1.0,
-            'WIDTH_DEBIT_MIN': 1.0,
-            'WIDTH_DEBIT_MAX': 1.2,
             
             # RR 计算 - 信用 IVR 映射
             'CREDIT_IVR_0_25': 0.20,
@@ -120,29 +125,31 @@ class StrategyCalculator:
         parsed = {}
         for key, default_value in defaults.items():
             value = env_vars.get(key, default_value)
-            try:
-                parsed[key] = float(value)
-            except (ValueError, TypeError):
+            # ✅ 修复：添加 None 值检查
+            if value is None:
+                print(f"⚠️ [CODE3] 环境变量 {key} 为 None，使用默认值 {default_value}")
                 parsed[key] = default_value
+            else:
+                try:
+                    parsed[key] = float(value)
+                except (ValueError, TypeError):
+                    print(f"⚠️ [CODE3] 环境变量 {key} 转换失败，使用默认值 {default_value}")
+                    parsed[key] = default_value
         
         return parsed
     
     # ============= 1. 行权价计算 =============
     
     def calculate_strikes(self, spot: float, em1: float, walls: Dict) -> Dict:
-        """
-        计算各策略的行权价
-        
-        Args:
-            spot: 现价
-            em1: EM1$ 预期单日波幅
-            walls: 墙位信息 {call_wall, put_wall, major_wall}
-        
-        Returns:
-            各策略的行权价字典
-        """
+        """计算各策略的行权价"""
         call_wall = walls.get("call_wall", spot * 1.05)
         put_wall = walls.get("put_wall", spot * 0.95)
+        
+        # ✅ 修复：添加 None 值检查
+        if call_wall is None:
+            call_wall = spot * 1.05
+        if put_wall is None:
+            put_wall = spot * 0.95
         
         return {
             "iron_condor": {
@@ -200,17 +207,12 @@ class StrategyCalculator:
     # ============= 2. DTE 计算 =============
     
     def calculate_dte(self, gap_distance_em1: float, monthly_override: bool) -> Dict:
-        """
-        动态 DTE 计算
+        """动态 DTE 计算"""
+        # ✅ 修复：添加 None 值检查
+        if gap_distance_em1 is None:
+            gap_distance_em1 = 2.0
+            print("⚠️ [CODE3] gap_distance_em1 为 None，使用默认值 2.0")
         
-        Args:
-            gap_distance_em1: gap 距离（EM1$ 倍数）
-            monthly_override: 是否月度叠加
-        
-        Returns:
-            DTE 信息字典
-        """
-        # 基础规则
         if gap_distance_em1 > self.env['DTE_GAP_HIGH_THRESHOLD']:
             base_dte = 14
             gap_level = "high"
@@ -221,11 +223,10 @@ class StrategyCalculator:
             base_dte = 7
             gap_level = "low"
         
-        # 月度调整
         if monthly_override:
             adjustment = int(self.env['DTE_MONTHLY_ADJUSTMENT'])
             final_dte = base_dte + adjustment
-            rationale = f"gap_distance_em1={gap_distance_em1:.2f}>{self.env['DTE_GAP_HIGH_THRESHOLD']if gap_level=='high' else f'在{self.env['DTE_GAP_MID_THRESHOLD']}-{self.env['DTE_GAP_HIGH_THRESHOLD']}' if gap_level=='mid' else f'<{self.env['DTE_GAP_MID_THRESHOLD']}'}选择{base_dte}日DTE，月度叠加+{adjustment}日={final_dte}日"
+            rationale = f"gap_distance_em1={gap_distance_em1:.2f}选择{base_dte}日DTE，月度叠加+{adjustment}日={final_dte}日"
         else:
             final_dte = base_dte
             rationale = f"gap_distance_em1={gap_distance_em1:.2f}选择{final_dte}日DTE，无月度叠加"
@@ -241,17 +242,7 @@ class StrategyCalculator:
     # ============= 3. RR 盈亏比计算 =============
     
     def calculate_rr_credit(self, width: float, ivr: float = 40) -> Dict:
-        """
-        信用价差 RR 计算
-        
-        Args:
-            width: 价差宽度
-            ivr: 隐含波动率百分位（0-100）
-        
-        Returns:
-            RR 计算结果
-        """
-        # IVR 映射
+        """信用价差 RR 计算"""
         if ivr <= 25:
             credit_ratio = self.env['CREDIT_IVR_0_25']
             ivr_range = "0-25%"
@@ -268,11 +259,7 @@ class StrategyCalculator:
         credit = width * credit_ratio
         max_loss = width - credit
         
-        # 格式化 RR 比率
-        if credit > 0:
-            rr_simplified = f"1:{max_loss/credit:.1f}"
-        else:
-            rr_simplified = "N/A"
+        rr_simplified = f"1:{max_loss/credit:.1f}" if credit > 0 else "N/A"
         
         formula = f"Width={width:.2f}, IVR={ivr}%在{ivr_range}→credit_ratio={credit_ratio}, Credit={credit:.2f}, MaxLoss={max_loss:.2f}, RR={credit:.2f}:{max_loss:.2f}"
         
@@ -289,17 +276,7 @@ class StrategyCalculator:
         }
     
     def calculate_rr_debit(self, width: float, ivr: float = 40) -> Dict:
-        """
-        借贷价差 RR 计算
-        
-        Args:
-            width: 价差宽度
-            ivr: 隐含波动率百分位（0-100）
-        
-        Returns:
-            RR 计算结果
-        """
-        # IVR 映射
+        """借贷价差 RR 计算"""
         if ivr <= 40:
             debit_ratio = self.env['DEBIT_IVR_0_40']
             ivr_range = "0-40%"
@@ -313,11 +290,7 @@ class StrategyCalculator:
         debit = width * debit_ratio
         max_profit = width - debit
         
-        # 格式化 RR 比率
-        if debit > 0:
-            rr_simplified = f"{max_profit/debit:.1f}:1"
-        else:
-            rr_simplified = "N/A"
+        rr_simplified = f"{max_profit/debit:.1f}:1" if debit > 0 else "N/A"
         
         formula = f"Width={width:.2f}, IVR={ivr}%在{ivr_range}→debit_ratio={debit_ratio}, Debit={debit:.2f}, MaxProfit={max_profit:.2f}, RR={max_profit:.2f}:{debit:.2f}"
         
@@ -337,27 +310,23 @@ class StrategyCalculator:
     
     def calculate_pw_credit(self, cluster_strength: float, gap_distance_em1: float, 
                            technical_score: float = 0) -> Dict:
-        """
-        信用价差胜率计算
+        """信用价差胜率计算（修复版）"""
+        # ✅ 修复：添加 None 值检查
+        if cluster_strength is None:
+            cluster_strength = 1.0
+            print("⚠️ [CODE3] cluster_strength 为 None，使用默认值 1.0")
+        if gap_distance_em1 is None:
+            gap_distance_em1 = 2.0
+            print("⚠️ [CODE3] gap_distance_em1 为 None，使用默认值 2.0")
         
-        Args:
-            cluster_strength: 簇强度比率
-            gap_distance_em1: gap 距离（EM1$ 倍数）
-            technical_score: 技术面评分（0-2）
-        
-        Returns:
-            Pw 计算结果
-        """
         base = self.env['PW_CREDIT_BASE']
         cluster_adj = self.env['PW_CREDIT_CLUSTER_COEF'] * cluster_strength
         distance_penalty = self.env['PW_CREDIT_DISTANCE_PENALTY_COEF'] * gap_distance_em1
         
         pw_raw = base + cluster_adj - distance_penalty
         
-        # 技术面提升
         technical_boost = 0.05 * technical_score if technical_score > 0 else 0
         
-        # 限制范围
         pw_adjusted = max(self.env['PW_CREDIT_MIN'], 
                           min(self.env['PW_CREDIT_MAX'], 
                               pw_raw + technical_boost))
@@ -375,22 +344,21 @@ class StrategyCalculator:
             "pw_raw": round(pw_raw, 3),
             "pw_adjusted": round(pw_adjusted, 2),
             "pw_estimate": f"{int(pw_adjusted * 100)}%",
-            "formula": formula
+            "formula": formula,
+            "pw_note": f"簇强度{cluster_strength:.2f}，距离{gap_distance_em1:.2f}×EM1$，技术面{technical_score}分"
         }
     
     def calculate_pw_debit(self, dex_same_dir_pct: float, vanna_confidence: str, 
                           gap_distance_em1: float) -> Dict:
-        """
-        借贷价差胜率计算
+        """借贷价差胜率计算（修复版）"""
+        # ✅ 修复：添加 None 值检查
+        if dex_same_dir_pct is None:
+            dex_same_dir_pct = 0.5
+            print("⚠️ [CODE3] dex_same_dir_pct 为 None，使用默认值 0.5")
+        if gap_distance_em1 is None:
+            gap_distance_em1 = 2.0
+            print("⚠️ [CODE3] gap_distance_em1 为 None，使用默认值 2.0")
         
-        Args:
-            dex_same_dir_pct: DEX 同向百分比（0-100）
-            vanna_confidence: Vanna 置信度（high/medium/low）
-            gap_distance_em1: gap 距离（EM1$ 倍数）
-        
-        Returns:
-            Pw 计算结果
-        """
         # Vanna 权重
         vanna_weight_map = {
             'high': self.env['PW_DEBIT_VANNA_WEIGHT_HIGH'],
@@ -399,9 +367,13 @@ class StrategyCalculator:
         }
         vanna_weight = vanna_weight_map.get(vanna_confidence, self.env['PW_DEBIT_VANNA_WEIGHT_LOW'])
         
-        # 基础计算
+        # ✅ 修复：检查 vanna_weight 是否为 None
+        if vanna_weight is None:
+            vanna_weight = self.env['PW_DEBIT_VANNA_WEIGHT_LOW']
+            print(f"⚠️ [CODE3] vanna_weight 为 None（confidence={vanna_confidence}），使用默认值")
+        
         base = self.env['PW_DEBIT_BASE']
-        dex_adj = self.env['PW_DEBIT_DEX_COEF'] * (dex_same_dir_pct / 100)
+        dex_adj = self.env['PW_DEBIT_DEX_COEF'] * dex_same_dir_pct
         vanna_adj = vanna_weight * self.env['PW_DEBIT_VANNA_COEF']
         
         pw_raw = base + dex_adj + vanna_adj
@@ -414,7 +386,6 @@ class StrategyCalculator:
         else:
             gap_penalty = 0
         
-        # 限制范围
         pw_adjusted = max(self.env['PW_DEBIT_MIN'], 
                           min(self.env['PW_DEBIT_MAX'], 
                               pw_raw + gap_penalty))
@@ -433,26 +404,32 @@ class StrategyCalculator:
             "pw_raw": round(pw_raw, 3),
             "pw_adjusted": round(pw_adjusted, 2),
             "pw_estimate": f"{int(pw_adjusted * 100)}%",
-            "formula": formula
+            "formula": formula,
+            "pw_note": f"DEX同向{dex_same_dir_pct*100:.1f}%，Vanna{vanna_confidence}置信"
         }
     
     def calculate_pw_butterfly(self, spot: float, body: float, em1: float, 
                                iv_path: str = "平") -> Dict:
-        """
-        蝶式策略胜率计算
+        """蝶式策略胜率计算"""
+        # ✅ 修复：添加 None 值检查
+        if spot is None or body is None or em1 is None or em1 == 0:
+            print("⚠️ [CODE3] 蝶式计算参数异常，返回默认值")
+            return {
+                "spot": spot,
+                "body": body,
+                "distance_em1": 0,
+                "distance_desc": "数据异常",
+                "iv_path": iv_path,
+                "iv_adj": 0,
+                "iv_note": "数据不足",
+                "pw_base": 0.5,
+                "pw_adjusted": 0.5,
+                "pw_estimate": "50%",
+                "formula": "数据异常，无法计算"
+            }
         
-        Args:
-            spot: 现价
-            body: 蝶式中心价格
-            em1: EM1$
-            iv_path: IV 路径（升/降/平）
+        distance_em1 = abs(spot - body) / em1
         
-        Returns:
-            Pw 计算结果
-        """
-        distance_em1 = abs(spot - body) / em1 if em1 > 0 else 0
-        
-        # 基础胜率
         if distance_em1 < 0.3:
             pw_base = self.env['PW_BUTTERFLY_BODY_INSIDE']
             distance_desc = "spot在body内"
@@ -463,7 +440,6 @@ class StrategyCalculator:
             pw_base = self.env['PW_BUTTERFLY_BODY_OFFSET_1EM']
             distance_desc = "偏离1EM1$"
         
-        # IV 调整
         if iv_path == "升":
             iv_adj = -0.05
             iv_note = "IV扩张不利蝶式"
@@ -495,12 +471,7 @@ class StrategyCalculator:
     # ============= 5. Greeks 范围 =============
     
     def get_greeks_ranges(self) -> Dict:
-        """
-        获取各策略类型的 Greeks 目标范围
-        
-        Returns:
-            Greeks 范围字典
-        """
+        """获取各策略类型的 Greeks 目标范围"""
         return {
             "conservative": {
                 "delta_min": self.env['CONSERVATIVE_DELTA_MIN'],
@@ -526,12 +497,7 @@ class StrategyCalculator:
     # ============= 6. 止盈止损参数 =============
     
     def get_exit_parameters(self) -> Dict:
-        """
-        获取止盈止损参数
-        
-        Returns:
-            止盈止损参数字典
-        """
+        """获取止盈止损参数"""
         return {
             "credit_strategies": {
                 "profit_target_pct": int(self.env['PROFIT_TARGET_CREDIT_PCT']),
@@ -554,19 +520,9 @@ class StrategyCalculator:
     # ============= 主处理函数 =============
     
     def process(self, agent3_data: Dict, agent5_data: Dict, technical_score: float = 0) -> Dict:
-        """
-        主处理流程
+        """主处理流程（修复版）"""
         
-        Args:
-            agent3_data: Agent 3 数据
-            agent5_data: Agent 5 数据
-            technical_score: 技术面评分
-        
-        Returns:
-            完整计算结果
-        """
-        
-        # 直接从根节点获取数据（不再处理 targets 数组）
+        # ✅ 修复：安全提取数据，添加 None 值检查
         spot = agent3_data.get("spot_price", 0)
         em1 = agent3_data.get("em1_dollar", 0)
         walls = agent3_data.get("walls", {})
@@ -609,7 +565,7 @@ class StrategyCalculator:
         )
         
         pw_debit = self.calculate_pw_debit(
-            directional_metrics.get("dex_same_dir_pct", 50),
+            directional_metrics.get("dex_same_dir_pct", 0.5),
             directional_metrics.get("vanna_confidence", "medium"),
             gamma_metrics.get("gap_distance_em1_multiple", 2.0)
         )
@@ -627,7 +583,7 @@ class StrategyCalculator:
         # 止盈止损参数
         exit_params = self.get_exit_parameters()
         
-        # 组装结果
+        # 组装结果（扁平化输出）
         result = {
             # 行权价（保留结构，供 Agent 6 选择）
             "strikes": strikes,
@@ -679,7 +635,7 @@ class StrategyCalculator:
             # Pw - Butterfly（扁平化）
             "pw_butterfly_estimate": pw_butterfly["pw_estimate"],
             "pw_butterfly_formula": pw_butterfly["formula"],
-            "pw_butterfly_note": pw_butterfly["pw_note"],
+            "pw_butterfly_note": pw_butterfly.get("pw_note", ""),
             "pw_butterfly_distance_em1": pw_butterfly["distance_em1"],
             
             # Greeks - Conservative（扁平化）
@@ -725,5 +681,4 @@ class StrategyCalculator:
             "meta_scenario_probability": scenario.get("scenario_probability", 0),
             "meta_gamma_regime": agent5_data.get("gamma_regime", {}).get("spot_vs_trigger", "unknown")
         }
-        
         return result

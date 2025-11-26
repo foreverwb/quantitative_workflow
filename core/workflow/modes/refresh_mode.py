@@ -17,16 +17,14 @@ class RefreshMode(FullAnalysisMode):
         """
         执行刷新快照
         
-        Refresh 模式流程：
-        1. Agent3 数据校验
-        2. 数据聚合
-        3. 字段计算
-        4. 保存快照（不执行完整分析）
+        Refresh 模式流程：Agent3 → Calculator → 保存快照
+        
+        注意：Refresh 模式不使用 Aggregator，不合并历史数据
         
         Args:
             symbol: 股票代码
             data_folder: 数据文件夹路径
-            state: 当前状态
+            state: 当前状态（保留兼容）
             
         Returns:
             快照结果
@@ -47,20 +45,27 @@ class RefreshMode(FullAnalysisMode):
         # 2. Agent3 数据校验
         agent3_result = self._run_agent3(symbol, images)
         
-        # 3. 数据聚合
-        aggregated_result = self._run_aggregator(agent3_result, state)
+        # 3. Calculator（直接计算，跳过 Aggregator）
+        calculated_result = self._run_calculator_direct(agent3_result, symbol)
         
         # 4. 解析数据
-        aggregated_data = self.safe_parse_json(aggregated_result.get("result"))
+        calculated_data = self.safe_parse_json(calculated_result.get("result"))
         
-        # 5. 字段计算
-        calculated_data = self._run_calculator(aggregated_data)
+        # 5. 检查数据完整性
+        if calculated_data.get("data_status") != "ready":
+            return {
+                "status": "error",
+                "message": "数据不完整，无法保存快照",
+                "validation": calculated_data.get("validation", {}),
+                "missing_fields": calculated_data.get("validation", {}).get("missing_fields", [])
+            }
         
-        # 6. 保存快照
+        # 6. 保存快照（作为 snapshots_N）
         snapshot_result = self.cache_manager.save_greeks_snapshot(
             symbol=symbol,
             data=calculated_data,
-            note="盘中刷新"
+            note="盘中刷新",
+            is_initial=False  # refresh 不是初始数据
         )
         
         # 7. 生成摘要
@@ -73,7 +78,8 @@ class RefreshMode(FullAnalysisMode):
             "status": "success",
             "mode": "refresh",
             "snapshot": snapshot,
-            "snapshot_summary": summary
+            "snapshot_summary": summary,
+            "total_snapshots": snapshot_result.get("total_snapshots", 0)
         }
     
     def _run_calculator(self, data: Dict) -> Dict:

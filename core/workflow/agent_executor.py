@@ -115,7 +115,6 @@ class AgentExecutor:
             执行结果
         """
         logger.info(f"🔧 [{node_name}] 开始执行")
-        
         try:
             # 执行函数
             result = func(**kwargs)

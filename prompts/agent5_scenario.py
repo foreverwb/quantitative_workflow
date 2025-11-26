@@ -1,7 +1,9 @@
+
 """
 Agent 5: 场景分析 Prompt
 基于四维评分生成多种市场场景
 """
+import json
 
 def get_system_prompt() -> str:
     """系统提示词"""

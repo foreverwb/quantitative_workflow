@@ -27,7 +27,7 @@ agents:
   # Agent 3: 数据校验（需要视觉能力）
   agent3:
     provider: openai
-    model: gpt-4o       # 需要视觉支持
+    model: Qwen3-VL-235B-A22B-Thinking    # 需要视觉支持 gpt-4.1-mini-2025-04-14 gpt-4.1-2025-04-14 gpt-4.1-2025-04-14
     temperature: 0.3
     max_tokens: 8192
     supports_vision: true
@@ -35,9 +35,9 @@ agents:
   # Agent 5: 场景分析（复杂推理，使用高级模型）
   agent5:
     provider: openai
-    model: deepseek-v3.2-exp-thinking  # 切换到 Claude（推理能力强）
+    model: gpt-5.1 # 切换到 Claude（推理能力强）
     temperature: 0.5
-    max_tokens: 3072
+    max_tokens: 4096
   
   # Agent 6: 策略生成（高级推理）
   agent6:

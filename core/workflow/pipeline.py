@@ -2,6 +2,8 @@
 分析流程编排器
 定义完整分析流程的步骤顺序
 """
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
 
 import json
 from typing import Dict, Any
@@ -37,8 +39,10 @@ class AnalysisPipeline:
         """
         运行完整流程
         
+        注意：initial_data 应该是已经过 Calculator 计算的完整数据
+        
         Args:
-            initial_data: 初始数据（来自 Aggregator）
+            initial_data: 初始数据（包含 23 个字段）
             
         Returns:
             完整分析结果
@@ -46,12 +50,11 @@ class AnalysisPipeline:
         # 初始化上下文
         context = {
             "initial_data": initial_data,
-            "symbol": initial_data.get("symbol", "UNKNOWN")
+            "symbol": initial_data.get("symbol", "UNKNOWN"),
+            "calculated_data": initial_data  # 直接使用已计算的数据
         }
-        
-        # 定义流程步骤
+        # 定义流程步骤（移除 Calculator）
         steps = [
-            ("字段计算", self._step_calculate_fields),
             ("事件检测", self._step_event_detection),
             ("评分计算", self._step_scoring),
             ("场景分析", self._step_scenario),
@@ -86,20 +89,6 @@ class AnalysisPipeline:
             "ranking": context.get("ranking_result")
         }
     
-    def _step_calculate_fields(self, context: Dict) -> Dict:
-        """步骤1：字段计算"""
-        from code_nodes.field_calculator import main as calculator_main
-        
-        result = self.agent_executor.execute_code_node(
-            node_name="Calculator",
-            func=calculator_main,
-            aggregated_data=context["initial_data"],
-            **self.env_vars
-        )
-        
-        context["calculated_data"] = self._safe_parse_json(result["result"])
-        return context
-    
     def _step_event_detection(self, context: Dict) -> Dict:
         """步骤2：事件检测"""
         result = self.agent_executor.execute_code_node(
@@ -125,8 +114,7 @@ class AnalysisPipeline:
             technical_score=ta_score,
             **self.env_vars
         )
-        
-        context["scoring_data"] = self._safe_parse_json(result.get("result"))
+        context["scoring_data"] = self._safe_parse_json(result)
         return context
     
     def _step_scenario(self, context: Dict) -> Dict:
@@ -143,7 +131,6 @@ class AnalysisPipeline:
                 "content": prompts.agent5_scenario.get_user_prompt(scoring_data)
             }
         ]
-        
         response = self.agent_executor.execute_agent(
             agent_name="agent5",
             messages=messages,
@@ -159,17 +146,17 @@ class AnalysisPipeline:
         scenario_result = context["scenario_result"]
         
         ta_score = calculated_data.get("technical_analysis", {}).get("ta_score", 0)
-        
+        targets = calculated_data.get("targets", {})
         result = self.agent_executor.execute_code_node(
             node_name="CODE3 - 策略辅助",
             func=strategy_calc_main,
-            agent3_output=calculated_data,
+            agent3_output=targets,
             agent5_output=scenario_result,
             technical_score=ta_score,
             **self.env_vars
         )
         
-        context["strategy_calc_data"] = self._safe_parse_json(result.get("result"))
+        context["strategy_calc_data"] = self._safe_parse_json(result)
         return context
     
     def _step_strategy(self, context: Dict) -> Dict:

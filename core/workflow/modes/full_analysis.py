@@ -9,22 +9,23 @@ from loguru import logger
 
 import prompts
 import schemas
-from code_nodes import aggregator_main
+from code_nodes import aggregator_main, calculator_main
 from .base import BaseMode
 from ..pipeline import AnalysisPipeline
 
 
 class FullAnalysisMode(BaseMode):
     """完整分析模式"""
-    
     def execute(self, symbol: str, data_folder: Path, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行完整分析
         
+        流程：Agent3 → Aggregator → Calculator → Pipeline
+        
         Args:
             symbol: 股票代码
             data_folder: 数据文件夹路径
-            state: 当前状态
+            state: 当前状态（保留兼容，实际不使用）
             
         Returns:
             分析结果
@@ -45,19 +46,27 @@ class FullAnalysisMode(BaseMode):
         # 2. Agent3 数据校验
         agent3_result = self._run_agent3(symbol, images)
         
-        # 3. 数据聚合
-        aggregated_result = self._run_aggregator(agent3_result, state)
+        # 3. 数据聚合（增量合并）
+        aggregated_result = self._run_aggregator(agent3_result, symbol)
         
-        # 4. 判断数据状态
-        data_status = aggregated_result.get("data_status")
+        # 4. 字段计算 & 验证
+        calculated_result = self._run_calculator(aggregated_result, symbol)
+        # 5. 解析结果
+        data_status = calculated_result.get("data_status")
         
+        # 6. 判断状态
         if data_status == "awaiting_data":
             logger.warning(f"⚠️ 数据缺失，生成补齐指引")
-            return self._handle_incomplete_data(aggregated_result)
+            return {
+                "status": "incomplete",
+                "guide": calculated_result.get("guide", ""),
+                "validation": calculated_result.get("validation", {}),
+                "raw_result": calculated_result
+            }
         
         elif data_status == "ready":
             logger.info("✅ 数据完整，开始完整分析流程")
-            return self._run_full_pipeline(aggregated_result)
+            return self._run_full_pipeline(calculated_result)
         
         else:
             return {
@@ -122,11 +131,72 @@ class FullAnalysisMode(BaseMode):
         handler.log_request(symbol, inputs, valid_img_count)
         
         # 调用 API
-        response = self.agent_executor.execute_vision_agent(
-            agent_name="agent3",
-            inputs=inputs,
-            json_schema=schemas.agent3_schema.get_schema()
-        )
+        # response = self.agent_executor.execute_vision_agent(
+        #     agent_name="agent3",
+        #     inputs=inputs,
+        #     json_schema=schemas.agent3_schema.get_schema()
+        # )
+        response = {
+  "content": {
+    "targets": {
+      "atm_iv": {
+        "iv_14d": 0.45,
+        "iv_7d": 0.45,
+        "iv_source": "7d"
+      },
+      "directional_metrics": {
+        "vanna_dir": "up",
+        "dex_same_dir_pct": 0.61,
+        "iv_path": "升",
+        "iv_path_confidence": "high",
+        "vanna_confidence": "medium"
+      },
+      "gamma_metrics": {
+        "net_gex_sign": "positive_gamma",
+        "next_cluster_peak": {
+          "price": 195,
+          "abs_gex": 50
+        },
+        "spot_vs_trigger": "above",
+        "vol_trigger": 178,
+        "gap_distance_dollar": 16.1,
+        "monthly_data": {
+          "next_cluster_peak": {
+            "abs_gex": 50,
+            "price": 195
+          }
+        },
+        "nearby_peak": {
+          "abs_gex": 199.89,
+          "price": 194
+        },
+        "net_gex": 199.89
+      },
+      "spot_price": 194.1,
+      "symbol": "NVDA",
+      "walls": {
+        "major_wall": 200,
+        "major_wall_type": "call",
+        "put_wall": 185,
+        "call_wall": 200
+      }
+    },
+    "timestamp": "2025-11-12T01:51:30",
+    "indices": {
+      "qqq": {
+        "atm_iv_idx": 0.13,
+        "net_gex_idx": -50,
+        "spot_idx": 6848.61
+      },
+      "spx": {
+        "spot_idx": 6848.61,
+        "atm_iv_idx": 0.13,
+        "net_gex_idx": -50
+      }
+    },
+    "missing_fields": []
+  }
+}
         
         # 解析响应
         raw_content = response.get("content", {})
@@ -168,7 +238,7 @@ class FullAnalysisMode(BaseMode):
         
         return normalized_data
     
-    def _run_aggregator(self, agent3_result: Dict, state: Dict) -> Dict[str, Any]:
+    def _run_aggregator(self, agent3_result: Dict, symbol: str) -> Dict[str, Any]:
         """
         运行数据聚合器
         
@@ -181,33 +251,33 @@ class FullAnalysisMode(BaseMode):
         """
         logger.info("📦 [Aggregator] 数据聚合")
         
-        # 从状态获取会话变量
-        conv_vars = state.get("conversation_vars", {})
-        symbol = state.get("symbol", "UNKNOWN")
-        
-        # 执行聚合
         result = self.agent_executor.execute_code_node(
             node_name="Aggregator",
             func=aggregator_main,
             agent3_output=agent3_result,
-            first_parse_data=conv_vars.get("first_parse_data", ""),
-            current_symbol=symbol,
-            data_status=conv_vars.get("data_status", "initial"),
-            missing_count=conv_vars.get("missing_count", 0),
+            symbol=symbol,
             **self.env_vars
         )
+        return result
+    
+    def _run_calculator(self, agent3_result: Dict, symbol: str) -> Dict[str, Any]:
+        """
+        运行字段计算器
         
-        # 更新会话变量
-        if "first_parse_data" in result:
-            conv_vars["first_parse_data"] = result["first_parse_data"]
-        if "data_status" in result:
-            conv_vars["data_status"] = result["data_status"]
-        if "missing_count" in result:
-            conv_vars["missing_count"] = result["missing_count"]
+        Args:
+            data: 聚合后的数据
+            
+        Returns:
+            计算后的数据
+        """
         
-        # 保存状态
-        self.state_manager.update_conversation_vars(symbol, **conv_vars)
-        
+        result = self.agent_executor.execute_code_node(
+            node_name="Calculator",
+            func=calculator_main,
+            aggregated_data=agent3_result,
+            symbol=symbol,
+            **self.env_vars
+        )
         return result
     
     def _handle_incomplete_data(self, aggregated_result: Dict) -> Dict[str, Any]:
@@ -262,10 +332,6 @@ class FullAnalysisMode(BaseMode):
             完整分析结果
         """
         logger.info("🚀 开始完整分析流程")
-        
-        # 解析聚合数据
-        merged_data = self.safe_parse_json(aggregated_result.get("result"))
-        
         # 创建并运行 Pipeline
         pipeline = AnalysisPipeline(
             agent_executor=self.agent_executor,
@@ -273,7 +339,7 @@ class FullAnalysisMode(BaseMode):
             env_vars=self.env_vars
         )
         
-        result = pipeline.run(merged_data)
+        result = pipeline.run(aggregated_result)
         
         logger.success("✅ 完整分析流程完成")
         

@@ -3,32 +3,24 @@ import json
 from typing import Dict, Any
 
 
-def main(agent3_output: str, technical_score: float = 0, **env_vars) -> dict:
+def main(agent3_output: dict, technical_score: float = 0, **env_vars) -> dict:
     """
     Dify Code Node 入口函数
     
     Args:
         agent3_output: Agent 3 的数据校验结果 JSON 字符串
-        agent4_output: Agent 4 的技术面分析 JSON 字符串 (可选)
         **env_vars: 环境变量字典
         
     Returns:
         {"result": 评分结果 JSON 字符串}
     """
     try:
-        # 解析输入
-        agent3_data = json.loads(agent3_output)
-        
+    
         # 初始化评分引擎
-        scoring = OptionsScoring(env_vars)
-        
+        scoring = OptionsScoring(env_vars)    
         # 执行评分计算
-        result = scoring.process(agent3_data)
-        
-        # 返回 JSON 字符串
-        return {
-            "result": json.dumps(result, ensure_ascii=False, indent=2)
-        }
+        result = scoring.process(agent3_output)
+        return result
         
     except Exception as e:
         # 错误处理
@@ -52,6 +44,7 @@ class OptionsScoring:
         Args:
             env_vars: 环境变量字典，包含所有阈值参数
         """
+        
         self.env = self._parse_env_vars(env_vars)
         
     def _parse_env_vars(self, env_vars: Dict[str, Any]) -> Dict[str, float]:
@@ -60,27 +53,26 @@ class OptionsScoring:
         
         # 必需的环境变量及其默认值
         defaults = {
-            'SCORE_WEIGHT_GAMMA_REGIME': env_vars.SCORE_WEIGHT_GAMMA_REGIME,
-            'SCORE_WEIGHT_BREAK_WALL': env_vars.SCORE_WEIGHT_BREAK_WALL,
-            'SCORE_WEIGHT_DIRECTION': env_vars.SCORE_WEIGHT_DIRECTION,
-            'SCORE_WEIGHT_IV': env_vars.SCORE_WEIGHT_IV,
-            'BREAK_WALL_THRESHOLD_LOW': env_vars.BREAK_WALL_THRESHOLD_LOW,
-            'BREAK_WALL_THRESHOLD_HIGH': env_vars.BREAK_WALL_THRESHOLD_HIGH,
-            'MONTHLY_OVERRIDE_THRESHOLD': env_vars.MONTHLY_OVERRIDE_THRESHOLD,
-            'MONTHLY_CLUSTER_STRENGTH_RATIO': env_vars.MONTHLY_CLUSTER_STRENGTH_RATIO,
-            'CLUSTER_STRENGTH_THRESHOLD_STRONG': env_vars.CLUSTER_STRENGTH_THRESHOLD_STRONG,
-            'CLUSTER_STRENGTH_THRESHOLD_TREND': env_vars.CLUSTER_STRENGTH_THRESHOLD_TREND,
-            'DEX_SAME_DIR_THRESHOLD_STRONG': env_vars.DEX_SAME_DIR_THRESHOLD_STRONG,
-            'DEX_SAME_DIR_THRESHOLD_MEDIUM': env_vars.DEX_SAME_DIR_THRESHOLD_MEDIUM,
-            'DEX_SAME_DIR_THRESHOLD_WEAK': env_vars.DEX_SAME_DIR_THRESHOLD_WEAK,
-            'PW_DEBIT_VANNA_WEIGHT_HIGH': env_vars.PW_DEBIT_VANNA_WEIGHT_HIGH,
-            'PW_DEBIT_VANNA_WEIGHT_MEDIUM': env_vars.PW_DEBIT_VANNA_WEIGHT_MEDIUM,
-            'PW_DEBIT_VANNA_WEIGHT_LOW': env_vars.PW_DEBIT_VANNA_WEIGHT_LOW,
-            'ENTRY_THRESHOLD_SCORE': env_vars.ENTRY_THRESHOLD_SCORE,
-            'ENTRY_THRESHOLD_PROBABILITY': env_vars.ENTRY_THRESHOLD_PROBABILITY,
-            'LIGHT_POSITION_PROBABILITY': env_vars.LIGHT_POSITION_PROBABILITY
+            'SCORE_WEIGHT_GAMMA_REGIME': env_vars["SCORE_WEIGHT_GAMMA_REGIME"],
+            'SCORE_WEIGHT_BREAK_WALL': env_vars["SCORE_WEIGHT_BREAK_WALL"],
+            'SCORE_WEIGHT_DIRECTION': env_vars["SCORE_WEIGHT_DIRECTION"],
+            'SCORE_WEIGHT_IV': env_vars["SCORE_WEIGHT_IV"],
+            'BREAK_WALL_THRESHOLD_LOW': env_vars["BREAK_WALL_THRESHOLD_LOW"],
+            'BREAK_WALL_THRESHOLD_HIGH': env_vars["BREAK_WALL_THRESHOLD_HIGH"],
+            'MONTHLY_OVERRIDE_THRESHOLD': env_vars["MONTHLY_OVERRIDE_THRESHOLD"],
+            'MONTHLY_CLUSTER_STRENGTH_RATIO': env_vars["MONTHLY_CLUSTER_STRENGTH_RATIO"],
+            'CLUSTER_STRENGTH_THRESHOLD_S': env_vars["CLUSTER_STRENGTH_THRESHOLD_S"],
+            'CLUSTER_STRENGTH_THRESHOLD_T': env_vars["CLUSTER_STRENGTH_THRESHOLD_T"],
+            'DEX_SAME_DIR_THRESHOLD_STRONG': env_vars["DEX_SAME_DIR_THRESHOLD_STRONG"],
+            'DEX_SAME_DIR_THRESHOLD_MEDIUM': env_vars["DEX_SAME_DIR_THRESHOLD_MEDIUM"],
+            'DEX_SAME_DIR_THRESHOLD_WEAK': env_vars["DEX_SAME_DIR_THRESHOLD_WEAK"],
+            'PW_DEBIT_VANNA_WEIGHT_HIGH': env_vars["PW_DEBIT_VANNA_WEIGHT_HIGH"],
+            'PW_DEBIT_VANNA_WEIGHT_MEDIUM': env_vars["PW_DEBIT_VANNA_WEIGHT_MEDIUM"],
+            'PW_DEBIT_VANNA_WEIGHT_LOW': env_vars["PW_DEBIT_VANNA_WEIGHT_LOW"],
+            'ENTRY_THRESHOLD_SCORE': env_vars["ENTRY_THRESHOLD_SCORE"],
+            'ENTRY_THRESHOLD_PROBABILITY': env_vars["ENTRY_THRESHOLD_PROBABILITY"],
+            'LIGHT_POSITION_PROBABILITY': env_vars["LIGHT_POSITION_PROBABILITY"]
         }
-        
         for key, default_value in defaults.items():
             value = env_vars.get(key, default_value)
             # 转换为 float
@@ -176,17 +168,17 @@ class OptionsScoring:
             prob_desc = "距离远"
         
         # 步骤3: 簇强度调整
-        if cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_STRONG']:
+        if cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_S']:
             adjustment = -1
-            cluster_note = f"簇强度{cluster_strength:.2f}≥{self.env['CLUSTER_STRENGTH_THRESHOLD_STRONG']}，主墙极强"
+            cluster_note = f"簇强度{cluster_strength:.2f}≥{self.env['CLUSTER_STRENGTH_THRESHOLD_S']}，主墙极强"
             cluster_desc = "极强阻力"
-        elif cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_TREND']:
+        elif cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_T']:
             adjustment = 0
-            cluster_note = f"簇强度{cluster_strength:.2f}在{self.env['CLUSTER_STRENGTH_THRESHOLD_TREND']}-{self.env['CLUSTER_STRENGTH_THRESHOLD_STRONG']}，中等强度"
+            cluster_note = f"簇强度{cluster_strength:.2f}在{self.env['CLUSTER_STRENGTH_THRESHOLD_T']}-{self.env['CLUSTER_STRENGTH_THRESHOLD_S']}，中等强度"
             cluster_desc = "中等阻力"
         else:
             adjustment = 1
-            cluster_note = f"簇强度{cluster_strength:.2f}<{self.env['CLUSTER_STRENGTH_THRESHOLD_TREND']}，较易突破"
+            cluster_note = f"簇强度{cluster_strength:.2f}<{self.env['CLUSTER_STRENGTH_THRESHOLD_T']}，较易突破"
             cluster_desc = "较弱阻力"
         
         final_score = max(1, min(10, base_score + adjustment))  # 限制在 1-10
@@ -371,7 +363,6 @@ class OptionsScoring:
             direction_score * w['SCORE_WEIGHT_DIRECTION'] +
             iv_score * w['SCORE_WEIGHT_IV']
         )
-        
         # 详细分解
         breakdown = (
             f"{gamma_score}×{w['SCORE_WEIGHT_GAMMA_REGIME']:.1f}+"
@@ -530,16 +521,16 @@ class OptionsScoring:
             )
         
         # 警示4: 簇强度极强
-        if cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_STRONG']:
+        if cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_S']:
             warnings.append(
-                f"簇强度{cluster_strength:.2f}≥{self.env['CLUSTER_STRENGTH_THRESHOLD_STRONG']:.1f}，"
+                f"簇强度{cluster_strength:.2f}≥{self.env['CLUSTER_STRENGTH_THRESHOLD_S']:.1f}，"
                 f"主墙极强，破墙难度高"
             )
         
         # 警示5: 簇强度接近极强阈值
-        elif cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_STRONG'] - 0.2:
+        elif cluster_strength >= self.env['CLUSTER_STRENGTH_THRESHOLD_S'] - 0.2:
             warnings.append(
-                f"簇强度{cluster_strength:.2f}接近{self.env['CLUSTER_STRENGTH_THRESHOLD_STRONG']:.1f}，"
+                f"簇强度{cluster_strength:.2f}接近{self.env['CLUSTER_STRENGTH_THRESHOLD_S']:.1f}，"
                 f"注意主墙阻力"
             )
         
@@ -555,51 +546,39 @@ class OptionsScoring:
         Returns:
             完整的评分结果 JSON
         """
-        # 提取目标数据（假设单标的）
-        targets = agent3_data.get('targets', [])
+        targets = agent3_data.get('targets', {})
         if not targets:
             raise ValueError("Agent 3 数据中未找到 targets 字段")
         
-        target = targets[0]
-        
         # 四维评分
         gamma_result = self.calculate_gamma_regime_score(
-            target.get('gamma_metrics', {})
+            targets.get('gamma_metrics', {})
         )
-        
         break_wall_result = self.calculate_break_wall_score(
-            target.get('gamma_metrics', {})
-        )
-        
+            targets.get('gamma_metrics', {})
+        )      
         direction_result = self.calculate_direction_score(
-            target.get('directional_metrics', {})
-        )
-        
+            targets.get('directional_metrics', {})
+        )  
         iv_result = self.calculate_iv_score(
-            target.get('directional_metrics', {})
-        )
-        
+            targets.get('directional_metrics', {})
+        )  
         # 汇总评分
         scores = {
             'gamma': gamma_result,
             'break_wall': break_wall_result,
             'direction': direction_result,
             'iv': iv_result
-        }
-        
+        }  
         # 总分计算
-        total_result = self.calculate_total_score(scores)
-        
+        total_result = self.calculate_total_score(scores)  
         # 入场检查
-        entry_result = self.check_entry_conditions(target, total_result['total_score'])
-        
+        entry_result = self.check_entry_conditions(targets, total_result['total_score'])  
         # 风险警示
-        risk_warning = self.generate_risk_warnings(target, scores)
-        
+        risk_warning = self.generate_risk_warnings(targets, scores)  
         # 提取关键位
-        walls = target.get('walls', {})
-        gamma_metrics = target.get('gamma_metrics', {})
-        
+        walls = targets.get('walls', {})
+        gamma_metrics = targets.get('gamma_metrics', {}) 
         # 组装最终输出
         result = {
             "gamma_regime": {
@@ -649,9 +628,8 @@ class OptionsScoring:
                 "support": walls.get('put_wall'),
                 "resistance": walls.get('call_wall'),
                 "trigger_line": gamma_metrics.get('vol_trigger'),
-                "current_spot": target.get('spot_price')
+                "current_spot": targets.get('spot_price')
             },
             "risk_warning": risk_warning
-        }
-        
+        } 
         return result

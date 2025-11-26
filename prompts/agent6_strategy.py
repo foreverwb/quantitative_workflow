@@ -2,6 +2,7 @@
 Agent 6: 策略生成 Prompt
 为每个场景生成2-3种期权策略
 """
+import json
 
 def get_system_prompt(env_vars: dict) -> str:
     """系统提示词"""

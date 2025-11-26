@@ -1,6 +1,8 @@
 import json
 from datetime import datetime, timedelta
 import re
+import urllib.request
+import urllib.error
 
 # 全局缓存字典（在工作流生命周期内保持）
 _earnings_cache = {}
@@ -25,8 +27,6 @@ def get_earnings_from_alpha_vantage(symbol, api_key, enable_api, cache_days, url
 
     # 调用API
     try:
-        import urllib.request
-        import urllib.error
         
         url = f"{url}function=EARNINGS_CALENDAR&horizon=12month&apikey={api_key}&symbol={symbol}"
         
@@ -160,7 +160,7 @@ def detect_events(symbol, current_date_str, api_key, enable_api, cache_days, url
                         "impact": "high",
                         "symbol": symbol_upper,
                         "source": "Alpha Vantage API",
-                        "cached": cache_key in _earnings_cache and (current_time - _earnings_cache[cache_key][1]).days < int(cache_days)
+                        # "cached": cache_key in _earnings_cache and (current_time - _earnings_cache[cache_key][1]).days < int(cache_days)
                     })
                     if -2 <= days_to_earnings <= 5:
                         recommendations["no_cross_earnings"] = True

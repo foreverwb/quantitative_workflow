@@ -1,18 +1,88 @@
 """
 模型客户端封装
 仅支持 OpenAI 兼容接口（包括 Responses API）
+⭐ 新增：支持 Strict JSON Schema Mode
 """
 
 import os
 import json
 from typing import Dict, Any, List, Optional
 from loguru import logger
+import copy
 
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
+
+def _sanitize_json_schema_for_vision(schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        递归规范化 JSON Schema 以满足 vision_structured_output 的要求：
+        - 对含 properties 的 object 节点，确保 additionalProperties=False（若未提供）。
+        - 对含 properties 的 object 节点，确保 required 是数组并包含 properties 中的每个键（补齐缺失项）。
+        返回深拷贝后的 schema，不修改原对象。
+        """
+        def _rec(node):
+            if not isinstance(node, dict):
+                return node
+
+            node = dict(node)  # shallow copy for safety
+
+            node_type = node.get("type")
+            has_props = isinstance(node.get("properties"), dict)
+
+            # 如果是 object 类型或含 properties，则视为 object 节点
+            if node_type == "object" or has_props:
+                # additionalProperties 要显式为 False（若为 dict，递归）
+                if "additionalProperties" not in node:
+                    node["additionalProperties"] = False
+                elif isinstance(node["additionalProperties"], dict):
+                    node["additionalProperties"] = _rec(node["additionalProperties"])
+
+                # 规范 required：必须存在且包含所有 properties 的键
+                if has_props:
+                    prop_keys = list(node["properties"].keys())
+                    existing_required = node.get("required")
+                    if isinstance(existing_required, list):
+                        # 补齐缺失的 keys
+                        missing = [k for k in prop_keys if k not in existing_required]
+                        if missing:
+                            node["required"] = existing_required + missing
+                    else:
+                        # 若不存在 required 或格式不对，直接设置为所有属性键
+                        node["required"] = prop_keys
+
+            # 递归处理 properties
+            if isinstance(node.get("properties"), dict):
+                for k, v in list(node["properties"].items()):
+                    node["properties"][k] = _rec(v)
+
+            # patternProperties
+            if isinstance(node.get("patternProperties"), dict):
+                for k, v in list(node["patternProperties"].items()):
+                    node["patternProperties"][k] = _rec(v)
+
+            # items（数组元素）
+            it = node.get("items")
+            if isinstance(it, dict):
+                node["items"] = _rec(it)
+            elif isinstance(it, list):
+                node["items"] = [_rec(x) for x in it]
+
+            # 组合关键字
+            for comb in ("allOf", "anyOf", "oneOf"):
+                if isinstance(node.get(comb), list):
+                    node[comb] = [_rec(s) for s in node[comb]]
+
+            # 如果 additionalProperties 本身是 schema，则递归
+            ap = node.get("additionalProperties")
+            if isinstance(ap, dict):
+                node["additionalProperties"] = _rec(ap)
+
+            return node
+
+        return _rec(copy.deepcopy(schema))
 
 
 class ModelClient:
@@ -50,10 +120,12 @@ class ModelClient:
         
         self.client = OpenAI(**client_kwargs)
         logger.debug(f"{self.provider.upper()} 客户端初始化: {self.model}")
+        
     
     def _get_api_key_from_env(self) -> Optional[str]:
         """从环境变量获取 API Key"""
         return os.environ.get('OPENAI_API_KEY') or os.environ.get('DMXAPI_KEY')
+    
     
     def chat_completion(
         self,
@@ -61,6 +133,7 @@ class ModelClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         json_schema: Optional[Dict] = None,
+        use_strict_mode: bool = True,  # ⭐ 新增参数
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -71,6 +144,7 @@ class ModelClient:
             temperature: 温度
             max_tokens: 最大token数
             json_schema: JSON Schema（用于结构化输出）
+            use_strict_mode: 是否使用严格模式（仅当 json_schema 存在时有效）
             
         Returns:
             响应字典
@@ -82,8 +156,24 @@ class ModelClient:
             "temperature": temperature if temperature is not None else self.temperature
         }
         
+        # ⭐ 关键改进：支持 Strict JSON Schema
         if json_schema:
-            request_params["response_format"] = {"type": "json_object"}
+            if use_strict_mode:
+                # Strict Mode: 模型必须 100% 遵守 Schema
+                sanitized_schema = _sanitize_json_schema_for_vision(json_schema)
+                request_params["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "structured_output",  # 可自定义名称
+                        "schema": sanitized_schema,
+                        "strict": True  # 🔑 关键！开启严格模式
+                    }
+                }
+                logger.debug("✅ 已启用 Strict JSON Schema Mode")
+            else:
+                # 兼容模式：仅要求 JSON 格式
+                request_params["response_format"] = {"type": "json_object"}
+                logger.debug("ℹ️ 使用兼容 JSON 模式（非严格）")
         
         try:
             response = self.client.chat.completions.create(**request_params)
@@ -93,8 +183,9 @@ class ModelClient:
             if json_schema and content:
                 try:
                     content = json.loads(content)
-                except json.JSONDecodeError:
-                    logger.warning("JSON解析失败，返回原始文本")
+                    logger.debug("✅ JSON 解析成功")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"⚠️ JSON 解析失败: {str(e)[:100]}，返回原始文本")
             
             return {
                 "content": content,
@@ -109,50 +200,57 @@ class ModelClient:
             logger.error(f"API 调用失败: {str(e)}")
             raise
     
-    # 在 ModelClient 类中找到 responses_create 方法并替换为以下内容
-    
     def responses_create(
         self,
         inputs: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         json_schema: Optional[Dict] = None,
+        use_strict_mode: bool = True,  # ⭐ 新增参数
         **kwargs
     ) -> Dict[str, Any]:
         """
-        OpenAI Responses API 接口适配器
-        修正：将 Responses 调用重定向到标准的 Chat Completions 接口 (Vision 支持)
+        OpenAI Responses API 接口适配器（Vision 支持）
+        ⭐ 新增：支持 Strict JSON Schema Mode
         
         Args:
             inputs: 输入列表（在 Agent3 中，这实际上是 messages 列表）
             temperature: 温度
             max_tokens: 最大token数
             json_schema: JSON Schema
+            use_strict_mode: 是否使用严格模式
             
         Returns:
             响应字典
         """
-        # Qwen-VL 和大多数视觉模型使用标准的 chat.completions 接口
-        # 日志显示 inputs 已经是 [{'role': 'system', ...}] 格式，直接映射为 messages
         request_params = {
             "model": self.model,
-            "messages": inputs, # 将 inputs 重命名为 messages
+            "messages": inputs,  # 将 inputs 重命名为 messages
             "max_tokens": max_tokens or self.max_tokens,
             "temperature": temperature if temperature is not None else self.temperature
         }
-
-        # 某些 Vision 模型对 stream 或 response_format 支持有限，这里保持简单
-        # if json_schema:
-        #     request_params["response_format"] = {"type": "json_object"}
         
-         # ⭐ 强制设置 JSON 模式（即使模型可能不完全支持）
+        # ⭐ 关键改进：支持 Strict JSON Schema（视觉模型）
         if json_schema:
-            request_params["response_format"] = {"type": "json_object"}
-            logger.debug(f"✅ 已设置 response_format=json_object")
+            if use_strict_mode:
+                # Strict Mode: 视觉模型也支持
+                sanitized_schema = _sanitize_json_schema_for_vision(json_schema)
+                request_params["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "vision_structured_output",
+                        "schema": sanitized_schema,
+                        "strict": True  # 🔑 视觉模型的严格模式
+                    }
+                }
+                logger.debug("✅ 已启用 Vision Strict JSON Schema Mode")
+            else:
+                # 兼容模式
+                request_params["response_format"] = {"type": "json_object"}
+                logger.debug("ℹ️ 使用兼容 JSON 模式（非严格）")
         
-        # ⭐ 对于视觉模型，额外在 system prompt 中强调
+        # ⭐ 对于视觉模型，在 system prompt 中强调 JSON 输出（双重保险）
         if self.supports_vision and json_schema:
-            # 在第一个 system 消息中添加 JSON 输出强调
             for msg in inputs:
                 if msg.get("role") == "system":
                     original_content = msg["content"]
@@ -163,7 +261,7 @@ class ModelClient:
                         + original_content
                     )
                     break
-
+        
         try:
             logger.debug(f"调用 Chat Completions (Vision): model={self.model}, messages={len(inputs)} 条")
             
@@ -173,9 +271,10 @@ class ModelClient:
             # 适配返回格式
             content = response.choices[0].message.content
             
-            # JSON 解析逻辑保持不变
+            # JSON 解析逻辑
             if json_schema and content:
                 try:
+                    # 清理可能的 Markdown 标记
                     import re
                     json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
                     if json_match:
@@ -277,17 +376,20 @@ class ModelClientManager:
         messages: List[Dict[str, Any]],
         agent_name: str = "default",
         json_schema: Optional[Dict] = None,
+        use_strict_mode: bool = True,  # ⭐ 新增参数
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         统一的聊天补全接口
+        ⭐ 新增：支持 Strict JSON Schema Mode
         
         Args:
             messages: 消息列表
             agent_name: Agent名称
             json_schema: JSON Schema
+            use_strict_mode: 是否使用严格模式（默认 True）
             temperature: 温度
             max_tokens: 最大token数
             
@@ -298,11 +400,15 @@ class ModelClientManager:
         
         logger.info(f"[{agent_name}] 调用模型: {client.provider}/{client.model}")
         
+        if json_schema and use_strict_mode:
+            logger.info(f"[{agent_name}] 🔒 启用 Strict JSON Schema Mode")
+        
         result = client.chat_completion(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
             json_schema=json_schema,
+            use_strict_mode=use_strict_mode,
             **kwargs
         )
         
@@ -323,17 +429,20 @@ class ModelClientManager:
         inputs: List[Dict[str, Any]],
         agent_name: str = "agent3",
         json_schema: Optional[Dict] = None,
+        use_strict_mode: bool = True,  # ⭐ 新增参数
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         OpenAI Responses API 接口（用于 Agent3 多图片输入）
+        ⭐ 新增：支持 Strict JSON Schema Mode
         
         Args:
             inputs: 输入列表
             agent_name: Agent名称
             json_schema: JSON Schema
+            use_strict_mode: 是否使用严格模式（默认 True）
             temperature: 温度
             max_tokens: 最大token数
             
@@ -344,11 +453,15 @@ class ModelClientManager:
         
         logger.info(f"[{agent_name}] 调用 Responses API: {client.provider}/{client.model}")
         
+        if json_schema and use_strict_mode:
+            logger.info(f"[{agent_name}] 🔒 启用 Vision Strict JSON Schema Mode")
+        
         result = client.responses_create(
             inputs=inputs,
             temperature=temperature,
             max_tokens=max_tokens,
             json_schema=json_schema,
+            use_strict_mode=use_strict_mode,
             **kwargs
         )
         

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: UTF-8 -*-
 """
 Swing Quant Workflow - 主程序入口
 期权分析策略系统

@@ -1,6 +1,9 @@
 """
-缓存管理器
-负责分析结果、快照的持久化
+缓存管理器（重构版）
+职责：
+1. 管理完整分析结果缓存
+2. 管理希腊值快照（支持多次 refresh）
+3. 快照对比功能
 """
 
 import json
@@ -11,33 +14,72 @@ from loguru import logger
 
 
 class CacheManager:
-    """缓存管理器"""
+    """缓存管理器（重构版）"""
     
-    def __init__(self, cache_dir: Path = Path("data/cache")):
-        """
-        初始化缓存管理器
+    def __init__(self):
+        """初始化缓存管理器"""
+        # 完整分析输出目录
+        self.output_dir = Path("data/output")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        Args:
-            cache_dir: 缓存目录
-        """
-        self.cache_dir = cache_dir
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # 临时缓存目录
+        self.temp_dir = Path("data/temp")
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
     
-    def get_cache_file(self, symbol: str) -> Path:
-        """获取缓存文件路径"""
-        return self.cache_dir / f"{symbol}_analysis.json"
+    # ============================================
+    # 完整分析结果缓存
+    # ============================================
     
-    def load_cache(self, symbol: str) -> Optional[Dict[str, Any]]:
+    def _get_output_filename(self, symbol: str, start_date: str = None) -> Path:
         """
-        加载缓存
+        获取输出文件路径
+        
+        格式：data/output/{SYMBOL}/{SYMBOL}_{start_date}.json
         
         Args:
             symbol: 股票代码
+            start_date: 分析开始日期（YYYYMMDD），不指定则使用今天
+            
+        Returns:
+            输出文件路径
+        """
+        if not start_date:
+            start_date = datetime.now().strftime("%Y%m%d")
+        
+        symbol_dir = self.output_dir / symbol
+        symbol_dir.mkdir(parents=True, exist_ok=True)
+        
+        return symbol_dir / f"{symbol}_{start_date}.json"
+    
+    def get_cache_file(self, symbol: str, start_date: str = None) -> Path:
+        """获取缓存文件路径（向后兼容）"""
+        return self._get_output_filename(symbol, start_date)
+    
+    def load_analysis(self, symbol: str, start_date: str = None) -> Optional[Dict[str, Any]]:
+        """
+        加载完整分析结果
+        
+        Args:
+            symbol: 股票代码
+            start_date: 分析开始日期（YYYYMMDD），不指定则查找最新
             
         Returns:
             缓存数据或 None
         """
-        cache_file = self.get_cache_file(symbol)
+        if start_date:
+            # 加载指定日期的分析
+            cache_file = self._get_output_filename(symbol, start_date)
+        else:
+            # 查找最新的分析文件
+            symbol_dir = self.output_dir / symbol
+            if not symbol_dir.exists():
+                return None
+            
+            analysis_files = sorted(symbol_dir.glob(f"{symbol}_*.json"), reverse=True)
+            if not analysis_files:
+                return None
+            
+            cache_file = analysis_files[0]
         
         if not cache_file.exists():
             return None
@@ -56,7 +98,8 @@ class CacheManager:
         scenario: Dict,
         strategies: Dict,
         ranking: Dict,
-        report: str
+        report: str,
+        start_date: str = None
     ):
         """
         保存完整分析结果
@@ -68,19 +111,23 @@ class CacheManager:
             strategies: 策略列表
             ranking: 策略排序
             report: 最终报告
+            start_date: 分析开始日期（YYYYMMDD）
         """
-        cache_file = self.get_cache_file(symbol)
+        if not start_date:
+            start_date = datetime.now().strftime("%Y%m%d")
+        
+        cache_file = self._get_output_filename(symbol, start_date)
         
         # 加载现有缓存
-        cached = self.load_cache(symbol)
+        cached = self.load_analysis(symbol, start_date)
         
         if not cached:
             cached = {
                 "symbol": symbol,
+                "start_date": start_date,
                 "created_at": datetime.now().isoformat(),
                 "last_updated": None,
                 "analysis": {},
-                "greeks_snapshots": [],
                 "backtest_records": []
             }
         
@@ -97,129 +144,20 @@ class CacheManager:
         
         cached["last_updated"] = datetime.now().isoformat()
         
-        # 保存首次快照
-        if not cached["greeks_snapshots"]:
-            snapshot = self._create_snapshot(
-                snapshot_id=0,
-                snapshot_type="initial_analysis",
-                data=initial_data,
-                note="完整分析"
-            )
-            cached["greeks_snapshots"].append(snapshot)
-        
         # 保存缓存
         self._save_cache(cache_file, cached)
         logger.success(f"✅ 完整分析结果已保存: {cache_file}")
     
-    def save_greeks_snapshot(
-        self,
-        symbol: str,
-        data: Dict,
-        note: str = ""
-    ) -> Dict[str, Any]:
-        """
-        保存 Greeks 快照
-        
-        Args:
-            symbol: 股票代码
-            data: 完整数据
-            note: 快照备注
-            
-        Returns:
-            快照保存结果
-        """
-        cache_file = self.get_cache_file(symbol)
-        
-        # 加载现有缓存
-        cached = self.load_cache(symbol)
-        
-        if not cached:
-            cached = {
-                "symbol": symbol,
-                "created_at": datetime.now().isoformat(),
-                "last_updated": None,
-                "analysis": {},
-                "greeks_snapshots": [],
-                "backtest_records": []
-            }
-        
-        # 获取上一次快照
-        previous_snapshot = cached["greeks_snapshots"][-1] if cached["greeks_snapshots"] else None
-        
-        # 创建新快照
-        snapshot_id = len(cached["greeks_snapshots"])
-        new_snapshot = self._create_snapshot(
-            snapshot_id=snapshot_id,
-            snapshot_type="intraday_refresh" if snapshot_id > 0 else "initial_analysis",
-            data=data,
-            note=note
-        )
-        
-        # 计算变化
-        if previous_snapshot:
-            new_snapshot["changes"] = self._calculate_snapshot_changes(
-                previous_snapshot,
-                new_snapshot
-            )
-        
-        # 添加快照
-        cached["greeks_snapshots"].append(new_snapshot)
-        cached["last_updated"] = datetime.now().isoformat()
-        
-        # 保存缓存
-        self._save_cache(cache_file, cached)
-        logger.success(f"✅ 快照已保存: {cache_file}")
-        
-        return {
-            "status": "success",
-            "snapshot": new_snapshot,
-            "cache_file": str(cache_file)
-        }
-    
-    def get_snapshots(self, symbol: str) -> List[Dict[str, Any]]:
-        """
-        获取所有快照
-        
-        Args:
-            symbol: 股票代码
-            
-        Returns:
-            快照列表
-        """
-        cached = self.load_cache(symbol)
-        
-        if not cached:
-            return []
-        
-        return cached.get("greeks_snapshots", [])
-    
-    def get_last_snapshot(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """
-        获取最后一次快照
-        
-        Args:
-            symbol: 股票代码
-            
-        Returns:
-            最后一次快照或 None
-        """
-        snapshots = self.get_snapshots(symbol)
-        
-        if not snapshots:
-            return None
-        
-        return snapshots[-1]
-    
-    def add_backtest_record(self, symbol: str, record: Dict[str, Any]):
+    def add_backtest_record(self, symbol: str, record: Dict[str, Any], start_date: str = None):
         """
         添加回测记录
         
         Args:
             symbol: 股票代码
             record: 回测记录
+            start_date: 分析开始日期
         """
-        cache_file = self.get_cache_file(symbol)
-        cached = self.load_cache(symbol)
+        cached = self.load_analysis(symbol, start_date)
         
         if not cached:
             logger.warning(f"未找到 {symbol} 的缓存，无法添加回测记录")
@@ -231,76 +169,285 @@ class CacheManager:
         record["timestamp"] = datetime.now().isoformat()
         cached["backtest_records"].append(record)
         
+        cache_file = self._get_output_filename(symbol, cached.get("start_date"))
         self._save_cache(cache_file, cached)
         logger.info(f"✅ 回测记录已添加")
     
-    def _create_snapshot(
+    # ============================================
+    # 希腊值快照管理（refresh 快照）
+    # ============================================
+    
+    def save_greeks_snapshot(
         self,
-        snapshot_id: int,
-        snapshot_type: str,
+        symbol: str,
         data: Dict,
-        note: str = ""
-    ) -> Dict[str, Any]:
-        """创建快照对象"""
+        note: str = "",
+        is_initial: bool = False,
+        cache_file_name: str = None
+    ) -> Dict:
+        """
+        保存希腊值快照（支持多次 refresh）
+        
+        数据格式：
+        {
+            "start_date": "2025-11-27",
+            "source_target": {...},  # 最初的完整数据
+            "snapshots_1": {...},    # 第1次 refresh
+            "snapshots_2": {...},    # 第2次 refresh
+            ...
+        }
+        
+        Args:
+            symbol: 股票代码
+            data: 完整数据
+            note: 备注
+            is_initial: 是否为初始分析（source_target）
+            cache_file_name: 缓存文件名（如 NVDA_20251127.json）
+            
+        Returns:
+            保存结果
+        """
+        # 确定快照文件路径
+        if cache_file_name:
+            # 使用指定的缓存文件名
+            snapshot_file = self._get_output_filename(
+                symbol, 
+                cache_file_name.replace(f"{symbol}_", "").replace(".json", "")
+            )
+        else:
+            # 使用当前日期
+            snapshot_file = self._get_output_filename(symbol)
+        
+        # 提取 targets 数据
         targets = data.get("targets", {})
         
-        return {
-            "snapshot_id": snapshot_id,
-            "type": snapshot_type,
+        # 创建快照记录
+        snapshot_record = {
             "timestamp": datetime.now().isoformat(),
             "note": note,
-            "spot_price": targets.get("spot_price"),
-            "em1_dollar": targets.get("em1_dollar"),
-            "vol_trigger": self._get_nested_value(targets, "gamma_metrics.vol_trigger"),
-            "spot_vs_trigger": self._get_nested_value(targets, "gamma_metrics.spot_vs_trigger"),
-            "net_gex": self._get_nested_value(targets, "gamma_metrics.net_gex"),
-            "call_wall": self._get_nested_value(targets, "walls.call_wall"),
-            "put_wall": self._get_nested_value(targets, "walls.put_wall"),
-            "iv_7d": self._get_nested_value(targets, "atm_iv.iv_7d"),
-            "iv_14d": self._get_nested_value(targets, "atm_iv.iv_14d"),
-            "data": data,
-            "changes": None
+            "targets": targets
+        }
+        
+        # 读取现有快照文件
+        if snapshot_file.exists():
+            with open(snapshot_file, 'r', encoding='utf-8') as f:
+                snapshots_data = json.load(f)
+        else:
+            # 首次创建
+            snapshots_data = {
+                "symbol": symbol,
+                "start_date": datetime.now().strftime("%Y-%m-%d"),
+                "source_target": None
+            }
+        
+        if is_initial:
+            # 保存初始数据到 source_target
+            snapshots_data["source_target"] = snapshot_record
+            logger.info(f"✅ 保存初始分析数据到 source_target")
+        else:
+            # 计算 refresh 次数
+            snapshot_count = sum(1 for key in snapshots_data.keys() if key.startswith("snapshots_"))
+            next_snapshot_key = f"snapshots_{snapshot_count + 1}"
+            
+            snapshots_data[next_snapshot_key] = snapshot_record
+            logger.info(f"✅ 保存第 {snapshot_count + 1} 次 refresh 快照")
+        
+        # 保存文件
+        with open(snapshot_file, 'w', encoding='utf-8') as f:
+            json.dump(snapshots_data, f, ensure_ascii=False, indent=2)
+        
+        logger.success(f"💾 快照已保存: {snapshot_file}")
+        
+        return {
+            "status": "success",
+            "snapshot_file": str(snapshot_file),
+            "snapshot": snapshot_record,
+            "total_snapshots": sum(1 for k in snapshots_data.keys() if k.startswith("snapshots_"))
         }
     
-    def _calculate_snapshot_changes(
-        self,
-        old_snapshot: Dict,
-        new_snapshot: Dict
-    ) -> Optional[Dict[str, Any]]:
-        """计算两次快照的变化"""
+    def load_latest_greeks_snapshot(self, symbol: str) -> Optional[Dict]:
+        """
+        加载最新的希腊值快照
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            最新快照数据，如果不存在返回 None
+        """
+        snapshot_file = self._get_snapshot_filename(symbol)
+        
+        if not snapshot_file.exists():
+            logger.warning(f"未找到快照文件: {snapshot_file}")
+            return None
+        
+        with open(snapshot_file, 'r', encoding='utf-8') as f:
+            snapshots_data = json.load(f)
+        
+        # 获取最新的快照
+        snapshot_keys = [k for k in snapshots_data.keys() if k.startswith("snapshots_")]
+        
+        if not snapshot_keys:
+            # 如果没有 refresh 快照，返回 source_target
+            return snapshots_data.get("source_target")
+        
+        # 返回最后一个快照
+        latest_key = sorted(snapshot_keys, key=lambda x: int(x.split("_")[1]))[-1]
+        return snapshots_data[latest_key]
+    
+    def get_all_snapshots(self, symbol: str) -> Optional[Dict]:
+        """
+        获取所有快照数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            完整的快照文件内容
+        """
+        snapshot_file = self._get_snapshot_filename(symbol)
+        
+        if not snapshot_file.exists():
+            return None
+        
+        with open(snapshot_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    
+    # ============================================
+    # 快照对比功能
+    # ============================================
+    
+    def compare_snapshots(self, symbol: str, from_num: int, to_num: int) -> Optional[Dict]:
+        """
+        对比两个快照的差异
+        
+        Args:
+            symbol: 股票代码
+            from_num: 起始快照编号（0 表示 source_target）
+            to_num: 结束快照编号
+            
+        Returns:
+            对比结果字典
+        """
+        snapshots_data = self.get_all_snapshots(symbol)
+        
+        if not snapshots_data:
+            logger.warning(f"未找到 {symbol} 的快照数据")
+            return None
+        
+        # 获取起始快照
+        if from_num == 0:
+            from_snapshot = snapshots_data.get("source_target")
+            from_label = "source_target"
+        else:
+            from_key = f"snapshots_{from_num}"
+            from_snapshot = snapshots_data.get(from_key)
+            from_label = f"快照 #{from_num}"
+        
+        # 获取结束快照
+        to_key = f"snapshots_{to_num}"
+        to_snapshot = snapshots_data.get(to_key)
+        to_label = f"快照 #{to_num}"
+        
+        if not from_snapshot or not to_snapshot:
+            logger.warning(f"快照不存在: {from_label} 或 {to_label}")
+            return None
+        
+        # 提取 targets 数据
+        from_targets = from_snapshot.get("targets", {})
+        to_targets = to_snapshot.get("targets", {})
+        
+        # 对比关键字段
         changes = {}
         
-        key_fields = [
-            "spot_price", "em1_dollar", "vol_trigger",
-            "call_wall", "put_wall", "net_gex",
-            "iv_7d", "iv_14d"
-        ]
+        # 1. spot_price
+        from_price = from_targets.get("spot_price")
+        to_price = to_targets.get("spot_price")
+        if from_price and to_price and from_price != to_price:
+            change_pct = ((to_price - from_price) / from_price) * 100
+            changes["spot_price"] = {
+                "from": from_price,
+                "to": to_price,
+                "change": round(to_price - from_price, 2),
+                "change_pct": round(change_pct, 2)
+            }
         
-        for field in key_fields:
-            old_value = old_snapshot.get(field)
-            new_value = new_snapshot.get(field)
-            
-            if old_value is None or new_value is None:
-                continue
-            
-            if old_value == -999 or new_value == -999:
-                continue
-            
-            if old_value != new_value:
-                change_info = {
-                    "old": old_value,
-                    "new": new_value
+        # 2. gamma_metrics
+        from_gamma = from_targets.get("gamma_metrics", {})
+        to_gamma = to_targets.get("gamma_metrics", {})
+        
+        for field in ["net_gex", "vol_trigger", "gap_distance_dollar"]:
+            from_val = from_gamma.get(field)
+            to_val = to_gamma.get(field)
+            if from_val and to_val and from_val != to_val:
+                change_pct = ((to_val - from_val) / from_val) * 100 if from_val != 0 else 0
+                changes[f"gamma_metrics.{field}"] = {
+                    "from": from_val,
+                    "to": to_val,
+                    "change": round(to_val - from_val, 2),
+                    "change_pct": round(change_pct, 2)
                 }
-                
-                # 计算百分比变化
-                if isinstance(old_value, (int, float)) and isinstance(new_value, (int, float)):
-                    if old_value != 0:
-                        pct_change = ((new_value - old_value) / old_value) * 100
-                        change_info["change_pct"] = round(pct_change, 2)
-                
-                changes[field] = change_info
         
-        return changes if changes else None
+        # spot_vs_trigger 变化（字符串）
+        from_trigger = from_gamma.get("spot_vs_trigger")
+        to_trigger = to_gamma.get("spot_vs_trigger")
+        if from_trigger != to_trigger:
+            changes["gamma_metrics.spot_vs_trigger"] = {
+                "from": from_trigger,
+                "to": to_trigger,
+                "changed": True
+            }
+        
+        # 3. walls
+        from_walls = from_targets.get("walls", {})
+        to_walls = to_targets.get("walls", {})
+        
+        for field in ["call_wall", "put_wall", "major_wall"]:
+            from_val = from_walls.get(field)
+            to_val = to_walls.get(field)
+            if from_val and to_val and from_val != to_val:
+                change_pct = ((to_val - from_val) / from_val) * 100 if from_val != 0 else 0
+                changes[f"walls.{field}"] = {
+                    "from": from_val,
+                    "to": to_val,
+                    "change": round(to_val - from_val, 2),
+                    "change_pct": round(change_pct, 2)
+                }
+        
+        # 4. atm_iv
+        from_iv = from_targets.get("atm_iv", {})
+        to_iv = to_targets.get("atm_iv", {})
+        
+        for field in ["iv_7d", "iv_14d"]:
+            from_val = from_iv.get(field)
+            to_val = to_iv.get(field)
+            if from_val and to_val and from_val != to_val:
+                change_pct = ((to_val - from_val) / from_val) * 100 if from_val != 0 else 0
+                changes[f"atm_iv.{field}"] = {
+                    "from": from_val,
+                    "to": to_val,
+                    "change": round(to_val - from_val, 2),
+                    "change_pct": round(change_pct, 2)
+                }
+        
+        return {
+            "from_snapshot": {
+                "label": from_label,
+                "timestamp": from_snapshot.get("timestamp"),
+                "note": from_snapshot.get("note")
+            },
+            "to_snapshot": {
+                "label": to_label,
+                "timestamp": to_snapshot.get("timestamp"),
+                "note": to_snapshot.get("note")
+            },
+            "changes": changes,
+            "total_changes": len(changes)
+        }
+    
+    # ============================================
+    # 辅助方法
+    # ============================================
     
     def _save_cache(self, cache_file: Path, data: Dict[str, Any]):
         """保存缓存到文件"""

@@ -2,7 +2,7 @@
 Agent 7: 策略排序 Prompt
 基于定量对比结果进行策略排序和推荐
 """
-
+import json
 def get_system_prompt() -> str:
     """系统提示词"""
     return """你是一位期权策略评估专家。
