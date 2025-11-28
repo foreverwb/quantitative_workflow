@@ -30,7 +30,12 @@ class WorkflowEngine:
         # 依赖注入
         self.state_manager = StateManager()
         self.cache_manager = CacheManager()
-        self.agent_executor = AgentExecutor(model_client, env_vars)
+        self.agent_executor = AgentExecutor(
+            model_client, 
+            env_vars, 
+            enable_pretty_print=True,
+            show_full_output=False
+        )
         
         # 延迟加载模式（避免循环导入）
         self._modes = None

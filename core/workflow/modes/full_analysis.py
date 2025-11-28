@@ -336,7 +336,8 @@ class FullAnalysisMode(BaseMode):
         pipeline = AnalysisPipeline(
             agent_executor=self.agent_executor,
             cache_manager=self.cache_manager,
-            env_vars=self.env_vars
+            env_vars=self.env_vars,
+            enable_pretty_print=True
         )
         
         result = pipeline.run(aggregated_result)

@@ -18,11 +18,20 @@ from code_nodes import (
     comparison_main
 )
 
+from utils.console_printer import (
+    print_header,
+    print_step,
+    print_success,
+    print_error,
+    print_info,
+    print_warning
+)
+
 
 class AnalysisPipeline:
     """分析流程编排器"""
     
-    def __init__(self, agent_executor, cache_manager, env_vars: Dict[str, Any]):
+    def __init__(self, agent_executor, cache_manager, env_vars: Dict[str, Any], enable_pretty_print: bool = True):
         """
         初始化 Pipeline
         
@@ -30,10 +39,12 @@ class AnalysisPipeline:
             agent_executor: Agent 执行器
             cache_manager: 缓存管理器
             env_vars: 环境变量
+            enable_pretty_print: 是否启用美化打印
         """
         self.agent_executor = agent_executor
         self.cache_manager = cache_manager
         self.env_vars = env_vars
+        self.enable_pretty_print = enable_pretty_print
     
     def run(self, initial_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -47,6 +58,15 @@ class AnalysisPipeline:
         Returns:
             完整分析结果
         """
+        
+         # 打印流程标题
+        if self.enable_pretty_print:
+            symbol = initial_data.get("symbol", "UNKNOWN")
+            print_header(
+                f"期权策略分析流程",
+                f"标的: {symbol} | 完整分析模式"
+            )
+            
         # 初始化上下文
         context = {
             "initial_data": initial_data,
@@ -66,18 +86,34 @@ class AnalysisPipeline:
             ("保存结果", self._step_save_results)
         ]
         
-        # 执行流程
-        for i, (step_name, step_func) in enumerate(steps, 1):
+       # 执行流程
+        for i, (step_name, step_func, step_desc) in enumerate(steps, 1):
+            if self.enable_pretty_print:
+                print_step(i, len(steps), f"{step_name} - {step_desc}")
+            
             logger.info(f"📍 Step {i}/{len(steps)}: {step_name}")
+            
             try:
                 context = step_func(context)
+                
+                if self.enable_pretty_print:
+                    print_success(f"{step_name} 完成")
+            
             except Exception as e:
+                if self.enable_pretty_print:
+                    print_error(f"{step_name} 失败", str(e))
+                
                 logger.error(f"❌ Step {step_name} 失败: {str(e)}")
+                
                 return {
                     "status": "error",
                     "failed_step": step_name,
                     "error": str(e)
                 }
+        
+        # 流程完成
+        if self.enable_pretty_print:
+            print_success("🎉 完整分析流程完成！")
         
         return {
             "status": "success",
@@ -280,6 +316,9 @@ class AnalysisPipeline:
             ranking=context["ranking_result"],
             report=context["final_report"]
         )
+        
+        if self.enable_pretty_print:
+            print_info(f"分析结果已保存至缓存: {symbol}")
         
         logger.success(f"✅ 分析结果已保存至缓存: {symbol}")
         

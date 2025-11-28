@@ -254,3 +254,10 @@ aliases:
 # 1. 会话变量（conversation_variables）已内置在 WorkflowEngine.conversation_vars 中
 # 2. 模型配置已独立至 config/model_config.yaml
 # 3. API Key 建议通过环境变量设置，避免直接写在配置文件中
+
+# 控制台输出配置
+console:
+  enable_color: true                # 是否启用颜色
+  show_full_output: false           # 是否显示完整输出
+  max_content_length: 1000          # 内容最大长度
+  json_max_depth: 3                 # JSON 显示深度
