@@ -104,6 +104,9 @@ class FieldCalculator:
         # 计算 cluster_strength_ratio
         targets = self._calculate_cluster_strength_ratio(targets)
         
+        # 计算 monthly_cluster_override
+        targets = self._calculate_monthly_cluster_override(targets)
+        
         # 验证计算结果
         validation = self._validate_calculations(targets)
         targets['_calculation_log'] = validation
@@ -179,6 +182,32 @@ class FieldCalculator:
         targets['gamma_metrics']['cluster_strength_ratio'] = round(ratio, 2)
         
         print(f"✅ cluster_strength_ratio: {next_cluster_abs_gex:.1f} / {nearby_abs_gex:.1f} = {ratio:.2f}")
+        
+        return targets
+    
+    def _calculate_monthly_cluster_override(self, targets: Dict) -> Dict:
+        gamma_metrics = targets.get('gamma_metrics', {})
+        weekly_data = gamma_metrics.get('weekly_data', {})
+        monthly_data = gamma_metrics.get('monthly_data', {})
+        
+        weekly_cluster_strength = weekly_data.get('cluster_strength', {})
+        monthly_cluster_strength = monthly_data.get('cluster_strength', {})
+        
+        w_cluster_strength_gex = weekly_cluster_strength.get('abs_gex')
+        m_cluster_strength_gex = monthly_cluster_strength.get('abs_gex')
+        
+        if not w_cluster_strength_gex or not m_cluster_strength_gex:
+            print("⚠️ monthly_cluster_override(月度簇占优) 计算缺失输入或 nearby_abs_gex 为 0")
+            if 'gamma_metrics' not in targets:
+                targets['gamma_metrics'] = {}
+            targets['gamma_metrics']['monthly_cluster_override'] = -999
+            return targets
+        
+        override = True if w_cluster_strength_gex and (m_cluster_strength_gex / w_cluster_strength_gex >= self.monthly_cluster_ratio) else False
+        
+        targets['gamma_metrics']['monthly_cluster_override'] = override
+        
+        print(f"✅ monthly_cluster_override: {m_cluster_strength_gex:.1f} / {w_cluster_strength_gex:.1f} >= {self.monthly_cluster_ratio:.2f}")
         
         return targets
     

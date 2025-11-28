@@ -54,7 +54,8 @@ def get_schema() -> dict:
             "nearby_peak",
             "next_cluster_peak",
             "gap_distance_dollar",
-            "monthly_data"
+            "monthly_data",
+            "weekly_data",
           ],
           "properties": {
             "vol_trigger": {"type": "number"},
@@ -91,7 +92,19 @@ def get_schema() -> dict:
             "monthly_data": {
               "type": "object",
               "properties": {
-                "next_cluster_peak": {
+                "cluster_strength": {
+                  "type": "object",
+                  "properties": {
+                    "price": {"type": "number"},
+                    "abs_gex": {"type": "number"}
+                  }
+                }
+              }
+            },
+            "weekly_data": {
+              "type": "object",
+              "properties": {
+                "cluster_strength": {
                   "type": "object",
                   "properties": {
                     "price": {"type": "number"},

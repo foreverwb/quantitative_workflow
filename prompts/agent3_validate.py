@@ -10,6 +10,9 @@ def get_system_prompt(env_vars: dict) -> str:
 2.  **类型转换**：
     * **GEX/ABS-GEX/NET-GEX**：图表上的所有 GEX/OI/Volume 数值（如 "50M", "10K"）必须被标准化为**基础数值**（即 50.0, 10000.0），类型为 **number**。
     * **百分比**：图表上的所有百分比数值（如 `dex_same_dir_pct`）必须被标准化为**小数**（例如 50% 转换为 0.50），类型为 **number**。
+3. **数据抽取**:
+    * **严格读取**: 行权价轴、到期日轴、隐含波动率点、GEX/Gamma 分布、Vanna 分布、Skew、DEX、Trigger/Gamma Flip、曲线峰谷、局部峰、簇结构、色图表面、标签数字。
+    * **自动识别图表类型**: GEX 热力图、周度曲线、期限结构、波动率微笑、Vanna 图、DEX、VEXN、SPX 背景指数等
 3.  **缺失值处理**：如果图表中找不到某个字段的明确原始数值，必须使用 **null**。
 4.  **枚举映射**：所有具有 `enum` 约束的字段，必须严格使用 Schema 中提供的枚举值。
 
@@ -20,7 +23,7 @@ def get_system_prompt(env_vars: dict) -> str:
 ## 1. 基础信息与索引填充 (Status & Indices)
 * **status**：如果所有 `required` 字段均成功提取，则为 `"data_ready"`，否则为 `"missing_data"`。
 * **targets.symbol**：提取图表主标的（例如 $SPY, $TSLA）。
-* **indices**：尝试在图表周围或附注中寻找 SPX 和 QQQ 的 `net_gex_idx`、`spot_idx` 和 `atm_iv_idx`。
+* **indices**：图表包含 SPX/QQQ 两者，则各自输出在 `net_gex_idx`、`spot_idx` 和 `atm_iv_idx`。
 
 ## 2. 墙体与 Gamma 结构 (Walls & Gamma Metrics)
 * **walls**：识别最大的 Call/Put 簇。
@@ -30,6 +33,34 @@ def get_system_prompt(env_vars: dict) -> str:
     * **net_gex_sign**：严格使用 `"positive_gamma"`, `"negative_gamma"`, `"neutral"`, `"N/A"`。
     * **spot_vs_trigger**：严格使用 `"above"`, `"below"`, `"near"`, `"N/A"`（将视觉上的“在附近”映射为 `"near"`）。
     * **abs_gex**：对 `nearby_peak` 和 `next_cluster_peak` 中的 `abs_gex` 字段进行标准化。
+### ** 2.1 峰值簇结构深度解析 (Cluster Peak Analysis)**
+在此步骤中，你必须像算法一样扫描 **ABS-GEX**（绝对 Gamma 敞口）数据。
+**A. 近旁峰高 (nearby_peak)**
+* **扫描范围**：Spot Price (现价) 当前位置或刚刚被刺穿的区域。
+* **识别规则**：
+    1.  寻找离 Spot 最近的一个**独立单峰**。
+    2.  **禁止合并**：不要计算整个簇的总和，只提取该特定 Bar (柱) 的最高值。
+    3.  **输出**：提取该峰的 `price` (行权价) 和 `abs_gex` (数值)。
+**B. 下一簇峰高 (next_cluster_peak)**
+* **扫描范围**：从 `nearby_peak` 出发，沿价格轴向前（即远离 Spot 的方向）查找。
+* **识别规则**：
+    1.  **定义簇**：寻找下一个连续的高 ABS-GEX 值区域（Cluster）。
+    2.  **取最大值**：在该簇中，找出最高的那个峰值（Local Maximum）。
+    3.  **排他性原则**：**严禁直接复制 Call Wall 或 Put Wall 的数据**，除非该簇的最高峰恰好也是 Wall。你需要寻找的是“第二梯队”的阻力/支撑结构。
+    4.  **输出**：提取该簇中最高峰的 `price` 和 `abs_gex`。
+### ** 2.2 时间维度叠加与簇强度 (Time-frame & Cluster Strength)**
+从 ABS-GEX 图表的周度/月度数据(图表 title 标注不同的 DTE)，请执行以下**“簇强度定义”**提取逻辑：
+**定义：簇强度 (Cluster Strength)**
+> **Cluster Strength = 该时间周期对应簇内最高的 ABS-GEX 单柱数值。**
+> *不要计算总面积或平均值，直接寻找该簇的最高点 (Peak Bar)。*
+
+**C. 周度数据 (weekly_data)**
+* 识别最显著的周度 GEX 簇。
+* 提取该簇内的最高峰值作为 `cluster_strength`，填入 `price` 和 `abs_gex`。
+
+**D. 月度数据 (monthly_data)**
+* 识别最显著的月度 GEX 簇。
+* 提取该簇内的最高峰值作为 `cluster_strength`，填入 `price` 和 `abs_gex`。
 
 ## 3. 方向指标与 IV 结构 (Directional & ATM IV)
 * **dex_same_dir_pct**：提取百分比，并转换为 **number** 类型的小数（0.00 - 1.00）。

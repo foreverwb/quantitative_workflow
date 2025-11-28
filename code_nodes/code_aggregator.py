@@ -77,9 +77,17 @@ def check_data_completeness(target: dict) -> dict:
     # 检查 monthly_data（可选，但如果存在需要验证结构）
     monthly_data = gamma.get("monthly_data", {})
     if monthly_data and isinstance(monthly_data, dict):
-        monthly_cluster = monthly_data.get("next_cluster_peak", {})
-        if isinstance(monthly_cluster, dict):
+        monthly_cluster_strength = monthly_data.get("cluster_strength", {})
+        if isinstance(monthly_cluster_strength, dict):
             # monthly_data 存在且结构正确，算作有效
+            pass
+    
+    # 检查 weekl_data（可选，但如果存在需要验证结构）
+    weekly_data = gamma.get("weekly_data", {})
+    if weekly_data and isinstance(weekly_data, dict):
+        weekly_cluster_strength = weekly_data.get("cluster_strength", {})
+        if isinstance(weekly_cluster_strength, dict):
+            # weekly_data 存在且结构正确，算作有效
             pass
     
     # 4. directional_metrics (5个字段)
