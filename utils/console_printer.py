@@ -498,6 +498,41 @@ def print_warning(message: str):
 def print_info(message: str):
     """快捷打印信息"""
     printer.print_info(message)
+    
+def print_error_summary(error_report: Dict):
+    """打印错误摘要"""
+    
+    summary = error_report.get("error_summary", {})
+    suggestions = error_report.get("suggestions", [])
+    completed = error_report.get("completed_steps", [])
+    
+    print()
+    printer._print_box(
+        f"{printer.ICONS['error']} 流程执行失败",
+        color='red'
+    )
+    
+    # 基本信息
+    print(printer._colorize(f"  严重程度: {summary.get('severity', 'unknown').upper()}", 'red'))
+    print(printer._colorize(f"  错误类别: {summary.get('category', 'unknown')}", 'red'))
+    print(printer._colorize(f"  失败节点: {summary.get('node', 'unknown')}", 'red'))
+    print(printer._colorize(f"  错误消息: {summary.get('message', '')}", 'red'))
+    print(printer._colorize(f"  发生时间: {summary.get('timestamp', '')}", 'dim'))
+    
+    # 已完成步骤
+    if completed:
+        print(printer._colorize(f"\n  ✅ 已完成步骤 ({len(completed)}):", 'green'))
+        for step_info in completed[-5:]:  # 只显示最后5个
+            step_name = step_info if isinstance(step_info, str) else step_info.get('step', '')
+            print(f"     {printer.ICONS['check']} {step_name}")
+    
+    # 修复建议
+    if suggestions:
+        print(printer._colorize(f"\n  💡 修复建议:", 'yellow'))
+        for i, suggestion in enumerate(suggestions, 1):
+            print(f"     {i}. {suggestion}")
+    
+    print()
 
 
 # ============================================

@@ -23,6 +23,7 @@ from utils.console_printer import (
     print_info,
     print_warning
 )
+from core.error_handler import ErrorHandler, WorkflowError, ErrorCategory, ErrorSeverity
 
 
 class AnalysisPipeline:
@@ -33,7 +34,8 @@ class AnalysisPipeline:
         cache_manager, 
         env_vars: Dict[str, Any],
         enable_pretty_print: bool = True,
-        cache_file: str = None
+        cache_file: str = None,
+        error_handler: ErrorHandler = None  # ⭐ 新增参数
     ):
         """
         初始化 Pipeline
@@ -49,6 +51,7 @@ class AnalysisPipeline:
         self.env_vars = env_vars
         self.enable_pretty_print = enable_pretty_print
         self.cache_file = cache_file  # ⭐ 新增：支持指定缓存文件
+        self.error_handler = error_handler  # ⭐ 保存错误处理器
     
     def run(self, initial_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -96,22 +99,59 @@ class AnalysisPipeline:
             logger.info(f"📍 Step {i}/{len(steps)}: {step_name}")
             
             try:
+                # ⭐ 记录步骤开始
+                if self.error_handler:
+                    self.error_handler.add_completed_step(f"Step {i}: {step_name} 开始")
+                
                 context = step_func(context)
+                
+                # ⭐ 记录步骤完成
+                if self.error_handler:
+                    self.error_handler.add_completed_step(f"Step {i}: {step_name} 完成")
                 
                 if self.enable_pretty_print:
                     print_success(f"{step_name} 完成")
             
+            except WorkflowError as we:
+                # ⭐ 捕获分类后的错误，立即终止
+                if self.enable_pretty_print:
+                    print_error(f"{step_name} 失败", we.message)
+                
+                logger.error(f"❌ Step {step_name} 失败: {we.message}")
+                
+                # 生成错误报告
+                if self.error_handler:
+                    return self.error_handler.handle_error(we)
+                else:
+                    return {
+                        "status": "error",
+                        "failed_step": step_name,
+                        "error": we.to_dict()
+                    }
+            
             except Exception as e:
+                # ⭐ 未分类错误（兜底）
                 if self.enable_pretty_print:
                     print_error(f"{step_name} 失败", str(e))
                 
                 logger.error(f"❌ Step {step_name} 失败: {str(e)}")
                 
-                return {
-                    "status": "error",
-                    "failed_step": step_name,
-                    "error": str(e)
-                }
+                workflow_error = WorkflowError(
+                    message=f"未预期的错误: {str(e)}",
+                    severity=ErrorSeverity.CRITICAL,
+                    category=ErrorCategory.CODE_BUG,
+                    node_name=step_name,
+                    original_error=e
+                )
+                
+                if self.error_handler:
+                    return self.error_handler.handle_error(workflow_error)
+                else:
+                    return {
+                        "status": "error",
+                        "failed_step": step_name,
+                        "error": str(e)
+                    }
         
         # 流程完成
         if self.enable_pretty_print:

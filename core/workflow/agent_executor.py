@@ -16,7 +16,7 @@ from utils.console_printer import (
     print_error,
     print_warning
 )
-
+from core.error_handler import classify_agent_error, classify_code_error, WorkflowError
 
 class AgentExecutor:
     """Agent 执行器 - 增强版（带美化输出）"""
@@ -82,11 +82,16 @@ class AgentExecutor:
             return response
         
         except Exception as e:
+            # 新增：错误分类
+            workflow_error = classify_agent_error(agent_name, e)
+            
             if self.enable_pretty_print:
                 print_error(f"[{agent_name}] 执行失败", str(e))
             
             logger.error(f"❌ [{agent_name}] 执行失败: {str(e)}")
-            raise
+            
+            # 抛出分类后的错误
+            raise workflow_error from e
     
     def execute_vision_agent(
         self,
@@ -186,10 +191,13 @@ class AgentExecutor:
                 "error_message": str(e),
                 "error_type": type(e).__name__
             }
+            # ⭐ 新增：错误分类
+            workflow_error = classify_code_error(node_name, e, kwargs)
             
             if self.enable_pretty_print:
                 print_code_node_result(node_name, error_result)
             
             logger.error(f"❌ [{node_name}] 执行失败: {str(e)}")
             
-            return error_result
+            # ⭐ 抛出分类后的错误
+            raise workflow_error from e

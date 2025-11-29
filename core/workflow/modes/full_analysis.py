@@ -12,67 +12,112 @@ import schemas
 from code_nodes import aggregator_main, calculator_main
 from .base import BaseMode
 from ..pipeline import AnalysisPipeline
-
+from core.error_handler import ErrorHandler, WorkflowError, ErrorCategory, ErrorSeverity
 
 class FullAnalysisMode(BaseMode):
     """完整分析模式"""
     def execute(self, symbol: str, data_folder: Path, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行完整分析
-        
-        流程：Agent3 → Aggregator → Calculator → Pipeline
-        
-        Args:
-            symbol: 股票代码
-            data_folder: 数据文件夹路径
-            state: 当前状态（保留兼容，实际不使用）
-            
-        Returns:
-            分析结果
-        """
+        """执行完整分析 - 增强容错"""
         logger.info(f"🎯 [完整分析模式] 开始分析 {symbol}")
         
-        # 1. 扫描图片
-        images = self.scan_images(data_folder)
+        # ⭐ 创建错误处理器
+        error_handler = ErrorHandler(symbol)
+    
+        try:
+            # 1. 扫描图片
+            error_handler.add_completed_step("扫描图片")
+            images = self.scan_images(data_folder)
+            
+            if not images:
+                return {
+                    "status": "error",
+                    "message": f"文件夹 {data_folder} 中未找到图片"
+                }
+            
+            logger.info(f"📊 扫描到 {len(images)} 张图片")
+            
+            # 2. Agent3 数据校验
+            error_handler.add_completed_step("开始 Agent3")
+            agent3_result = self._run_agent3(symbol, images)
+            error_handler.add_completed_step("完成 Agent3")
+            
+            # ⭐ Agent3 特殊判断：区分"数据不完整"和"运行错误"
+            content = agent3_result.get("content", {})
+            
+            # 检查是否为空列表（常见错误）
+            if isinstance(content.get("targets"), list) and not content["targets"]:
+                raise WorkflowError(
+                    message="Agent3 返回空列表，这是代码 Bug 或 Schema 问题",
+                    severity=ErrorSeverity.CRITICAL,
+                    category=ErrorCategory.CODE_BUG,
+                    node_name="Agent3",
+                    context={"response": agent3_result}
+                )
+            
+            # 检查 status 字段
+            status = content.get("status")
+            if status not in ["data_ready", "missing_data"]:
+                raise WorkflowError(
+                    message=f"Agent3 返回了未知的 status: {status}",
+                    severity=ErrorSeverity.CRITICAL,
+                    category=ErrorCategory.CODE_BUG,
+                    node_name="Agent3",
+                    context={"response": agent3_result}
+                )
+            
+            # 3. 数据聚合
+            error_handler.add_completed_step("开始 Aggregator")
+            aggregated_result = self._run_aggregator(agent3_result, symbol)
+            error_handler.add_completed_step("完成 Aggregator")
+            
+            # 4. 字段计算 & 验证
+            error_handler.add_completed_step("开始 Calculator")
+            calculated_result = self._run_calculator(aggregated_result, symbol)
+            error_handler.add_completed_step("完成 Calculator")
+            
+            # 5. 解析结果
+            data_status = calculated_result.get("data_status")
+            
+            # 6. 判断状态
+            if data_status == "awaiting_data":
+                logger.warning(f"⚠️ 数据缺失，生成补齐指引（非错误）")
+                return {
+                    "status": "incomplete",
+                    "guide": calculated_result.get("guide", ""),
+                    "validation": calculated_result.get("validation", {}),
+                    "raw_result": calculated_result
+                }
+            
+            elif data_status == "ready":
+                logger.info("✅ 数据完整，开始完整分析流程")
+                error_handler.add_completed_step("数据验证通过，进入 Pipeline")
+                return self._run_full_pipeline(calculated_result, error_handler)
+            
+            else:
+                raise WorkflowError(
+                    message=f"未知的数据状态: {data_status}",
+                    severity=ErrorSeverity.CRITICAL,
+                    category=ErrorCategory.CODE_BUG,
+                    node_name="Calculator",
+                    context={"data_status": data_status}
+                )
+    
+        except WorkflowError as we:
+            # ⭐ 捕获分类后的错误
+            logger.error(f"❌ 流程终止: {we.message}")
+            return error_handler.handle_error(we)
         
-        if not images:
-            return {
-                "status": "error",
-                "message": f"文件夹 {data_folder} 中未找到图片"
-            }
-        
-        logger.info(f"📊 扫描到 {len(images)} 张图片")
-        
-        # 2. Agent3 数据校验
-        agent3_result = self._run_agent3(symbol, images)
-        
-        # 3. 数据聚合（增量合并）
-        aggregated_result = self._run_aggregator(agent3_result, symbol)
-        
-        # 4. 字段计算 & 验证
-        calculated_result = self._run_calculator(aggregated_result, symbol)
-        # 5. 解析结果
-        data_status = calculated_result.get("data_status")
-        
-        # 6. 判断状态
-        if data_status == "awaiting_data":
-            logger.warning(f"⚠️ 数据缺失，生成补齐指引")
-            return {
-                "status": "incomplete",
-                "guide": calculated_result.get("guide", ""),
-                "validation": calculated_result.get("validation", {}),
-                "raw_result": calculated_result
-            }
-        
-        elif data_status == "ready":
-            logger.info("✅ 数据完整，开始完整分析流程")
-            return self._run_full_pipeline(calculated_result)
-        
-        else:
-            return {
-                "status": "error",
-                "message": f"未知的数据状态: {data_status}"
-            }
+        except Exception as e:
+            # ⭐ 未分类的错误（兜底）
+            logger.exception("❌ 未知错误")
+            workflow_error = WorkflowError(
+                message=f"未预期的错误: {str(e)}",
+                severity=ErrorSeverity.CRITICAL,
+                category=ErrorCategory.CODE_BUG,
+                node_name="Unknown",
+                original_error=e
+            )
+        return error_handler.handle_error(workflow_error)
     
     def _run_agent3(self, symbol: str, images: List[Path]) -> Dict[str, Any]:
         """
@@ -260,7 +305,7 @@ class FullAnalysisMode(BaseMode):
 👉 下一步: {result.get('user_guide_next_action', '')}
 """
     
-    def _run_full_pipeline(self, aggregated_result: Dict) -> Dict[str, Any]:
+    def _run_full_pipeline(self, aggregated_result: Dict, error_handler: ErrorHandler) -> Dict[str, Any]:
         """
         运行完整分析流程
         
@@ -277,7 +322,8 @@ class FullAnalysisMode(BaseMode):
             cache_manager=self.cache_manager,
             env_vars=self.env_vars,
             enable_pretty_print=True,
-            cache_file=self.engine.cache_file  # ⭐ 传递 cache_file
+            cache_file=self.engine.cache_file,  # ⭐ 传递 cache_file
+            error_handler=error_handler  # ⭐ 传递错误处理器
         )
         
         result = pipeline.run(aggregated_result)

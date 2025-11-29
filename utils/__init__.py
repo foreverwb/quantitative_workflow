@@ -60,5 +60,7 @@ __all__ = [
     'print_success',
     'print_error',
     'print_warning',
-    'print_info'
+    'print_info',
+    
+    'print_error_summary'
 ]

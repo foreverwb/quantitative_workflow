@@ -20,6 +20,8 @@ from loguru import logger
 
 from core.model_client import ModelClientFactory
 from core.workflow import WorkflowEngine
+from utils.console_printer import print_error_summary
+from core.workflow.agent_executor import AgentExecutor
 
 
 console = Console()
@@ -257,7 +259,6 @@ def analyze(symbol: str, folder: str, config: str, output: str, mode: str, cache
         env_vars = load_env_config()
         
         # 创建 Agent Executor
-        from core.workflow.agent_executor import AgentExecutor
         agent_executor = AgentExecutor(model_client, env_vars, enable_pretty_print=True)
         
         console.print(f"\n[green]🚀 开始生成 {symbol.upper()} 的命令清单[/green]\n")
@@ -375,6 +376,11 @@ def analyze(symbol: str, folder: str, config: str, output: str, mode: str, cache
         if result["status"] == "incomplete":
             console.print("\n[yellow]⚠️ 数据不完整[/yellow]\n")
             console.print(result["guide"])
+            
+        elif result["status"] == "error":
+            # ⭐ 错误处理
+            print_error_summary(result)
+            sys.exit(1)
         
         elif result["status"] == "success":
             console.print("\n[green]✅ 分析完成![/green]\n")
@@ -415,6 +421,10 @@ def analyze(symbol: str, folder: str, config: str, output: str, mode: str, cache
         logger.exception("分析过程出错")
         console.print(f"\n[red]❌ 错误: {str(e)}[/red]")
         sys.exit(1)
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠️ 用户中断执行[/yellow]")
+        sys.exit(0)
 
 
 @cli.command()
