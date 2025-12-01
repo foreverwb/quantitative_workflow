@@ -2,14 +2,13 @@
 完整分析模式
 执行完整的期权分析流程
 """
-
+import json
 from pathlib import Path
 from typing import Dict, Any, List
 from loguru import logger
 
 import prompts
 import schemas
-import json
 from code_nodes import aggregator_main, calculator_main
 from .base import BaseMode
 from ..pipeline import AnalysisPipeline
@@ -171,7 +170,7 @@ class FullAnalysisMode(BaseMode):
             inputs=inputs,
             json_schema=schemas.agent3_schema.get_schema()
         )
-        print("<<<<<<<<<<<<<<<<< Agent3 response >>>>>>>>>>>",json.dumps)
+        print("<<<<<<<<<<<<<<<<< Agent3 response >>>>>>>>>>>", json.dumps(response))
         # 解析响应
         raw_content = response.get("content", {})
         
@@ -181,7 +180,6 @@ class FullAnalysisMode(BaseMode):
             parsed_data = raw_content
         elif isinstance(raw_content, str):
             # 清洗 Markdown 标记
-            import json
             try:
                 clean_text = raw_content.strip()
                 if clean_text.startswith("```json"):

@@ -65,21 +65,44 @@ def get_system_prompt(env_vars: dict) -> str:
 * **iv_path**：严格使用 Schema 中定义的中文枚举值：`"升"`, `"降"`, `"平"`, `"数据不足"`。
 
 ## 4. 指数背景信息提取(indices)
-* **targets.indices**：提取图表指数标的（例如SPX, QQQ）。
+* **targets.indices**：提取指数标的 SPX 或 QQQ 图表
 * **indices.net_gex_idx**：NET-GEX, gexn or trigger 给到"Gamma翻转价位(TOTAL_VOL_Trigger/Gamma Flip)", SPOT_PRICE 在上方倾向 "positive_gamma", 下方倾向为 "negative_gamma"
 * **indices.spot_price_idx**：指数标的现价
 * **indices.iv_7d | iv_14d**：从 `skew {SPX/QQQ} ivmid atm 7` 和 `14`  分别提取 atm iv
 
+## 5.指数(indices)字段生成规则（严格执行）
+**CRITICAL RULE**:
+1. **仅根据原始输入中实际出现的指数符号生成对应指数对象**
+   - 输入中出现哪些指数，则输出中仅包含这些指数，且顺序一致
+   - 输入未出现的指数（例如 SPX）**禁止出现在输出 JSON 中**
+   
+2. **严禁自动补全、推断、填零或生成空对象**
+   - 错误示例：输入只有 QQQ，输出却包含 {"SPX": null, "QQQ": {...}}
+   - 正确示例：输入只有 QQQ，输出仅为 {"QQQ": {...}}
 
-## 5. 缺失字段列表 (Missing Fields Array)
+3. **动态结构要求**：
+   - `indices` 对象必须完全镜像输入的指数集合
+   - 验证规则：`targets.indices.keys == input.indices.keys`
+
+4. **示例对照**：
+   
+   **场景 1：仅上传 QQQ**
+```json
+   {
+     "indices": {
+       "QQQ": {
+         "net_gex_idx": "positive_gamma",
+         "spot_price_idx": 500.0,
+         "iv_7d": 0.18,
+         "iv_14d": 0.16
+       }
+     }
+   }
+```
+
+## 6. 缺失字段列表 (Missing Fields Array)
 * 如果任何 `required` 字段被赋值为 `null` 或无法提取，你必须在 `missing_fields` 数组中创建一个对象来记录它。
 * **severity**：对 `spot_price`, `vol_trigger` 等核心字段使用 `"critical"`。对 `dex_same_dir_pct` 等辅助字段使用 `"high"` 或 `"medium"`。
-
-## 6.指数字段生成规则
-* 仅根据原始输入中实际出现的指数符号生成对应指数对象,输入中出现哪些指数，则输出中仅包含这些指数，且顺序一致。
-* 输入未出现的指数（例如 SPX）禁止出现在输出 JSON 中，不得自动补全、推断、填零或生成空对象。
-* indices 对象必须完全镜像输入的指数集合: output.indices.keys == input.indices.keys
-* JSON schema 中列出的指数仅表示可支持结构，并非要求必须输出。
 
 ---
 **请根据此 Schema 和逻辑，开始分析上传的图表，并以完整的 JSON 代码块形式输出结果。**
