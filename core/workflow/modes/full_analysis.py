@@ -9,6 +9,7 @@ from loguru import logger
 
 import prompts
 import schemas
+import json
 from code_nodes import aggregator_main, calculator_main
 from .base import BaseMode
 from ..pipeline import AnalysisPipeline
@@ -48,17 +49,6 @@ class FullAnalysisMode(BaseMode):
             if isinstance(content.get("targets"), list) and not content["targets"]:
                 raise WorkflowError(
                     message="Agent3 返回空列表，这是代码 Bug 或 Schema 问题",
-                    severity=ErrorSeverity.CRITICAL,
-                    category=ErrorCategory.CODE_BUG,
-                    node_name="Agent3",
-                    context={"response": agent3_result}
-                )
-            
-            # 检查 status 字段
-            status = content.get("status")
-            if status not in ["data_ready", "missing_data"]:
-                raise WorkflowError(
-                    message=f"Agent3 返回了未知的 status: {status}",
                     severity=ErrorSeverity.CRITICAL,
                     category=ErrorCategory.CODE_BUG,
                     node_name="Agent3",
@@ -181,7 +171,7 @@ class FullAnalysisMode(BaseMode):
             inputs=inputs,
             json_schema=schemas.agent3_schema.get_schema()
         )
-        
+        print("<<<<<<<<<<<<<<<<< Agent3 response >>>>>>>>>>>",json.dumps)
         # 解析响应
         raw_content = response.get("content", {})
         
@@ -219,7 +209,6 @@ class FullAnalysisMode(BaseMode):
         handler.print_detailed_comparison(parsed_data, normalized_data)
         
         logger.success("✅ Agent3 数据处理完成")
-        
         return normalized_data
     
     def _run_aggregator(self, agent3_result: Dict, symbol: str) -> Dict[str, Any]:

@@ -22,6 +22,7 @@ from core.model_client import ModelClientFactory
 from core.workflow import WorkflowEngine
 from utils.console_printer import print_error_summary
 from core.workflow.agent_executor import AgentExecutor
+from utils.validators import validate_symbol
 
 
 console = Console()
@@ -241,6 +242,12 @@ def analyze(symbol: str, folder: str, config: str, output: str, mode: str, cache
     - 有文件夹：执行完整期权策略分析（Agent3 → Pipeline）
     """
     
+    is_valid, result = validate_symbol(symbol)
+    if not is_valid:
+        console.print(f"[red]❌ 错误: {result}[/red]")
+        console.print(f"[yellow]💡 示例: python app.py analyze -s AAPL -f data/uploads/AAPL[/yellow]")
+        sys.exit(1)
+        
     # ⭐ 智能判断：是否提供文件夹
     if not folder:
         # ========== 模式A：生成命令清单（Agent2） ==========

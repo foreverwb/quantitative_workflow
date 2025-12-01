@@ -21,11 +21,15 @@ class CacheManager:
         """初始化缓存管理器"""
         # 完整分析输出目录
         self.output_dir = Path("data/output")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # ⭐ 关键改动：仅在不存在时创建
+        if not self.output_dir.exists():
+            self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # 临时缓存目录
         self.temp_dir = Path("data/temp")
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        # ⭐ 关键改动：仅在不存在时创建
+        if not self.temp_dir.exists():
+            self.temp_dir.mkdir(parents=True, exist_ok=True)
     
     # ============================================
     # 完整分析结果缓存
@@ -33,13 +37,13 @@ class CacheManager:
     
     def _get_output_filename(self, symbol: str, start_date: str = None) -> Path:
         """
-        获取输出文件路径
+        获取输出文件路径（统一格式）
         
-        格式：data/output/{SYMBOL}/{SYMBOL}_{start_date}.json
+        格式：data/output/{SYMBOL}/{YYYYMMDD}/{SYMBOL}_{YYYYMMDD}.json
         
         Args:
             symbol: 股票代码
-            start_date: 分析开始日期（YYYYMMDD），不指定则使用今天
+            start_date: 分析开始日期（YYYYMMDD）
             
         Returns:
             输出文件路径
@@ -47,10 +51,14 @@ class CacheManager:
         if not start_date:
             start_date = datetime.now().strftime("%Y%m%d")
         
+        # ⭐ 创建日期子目录
         symbol_dir = self.output_dir / symbol
-        symbol_dir.mkdir(parents=True, exist_ok=True)
+        date_dir = symbol_dir / start_date
+        if not date_dir.exists():
+            logger.debug(f"📁 创建缓存目录: {date_dir}")
+            date_dir.mkdir(parents=True, exist_ok=True)
         
-        return symbol_dir / f"{symbol}_{start_date}.json"
+        return date_dir / f"{symbol}_{start_date}.json"
     
     def get_cache_file(self, symbol: str, start_date: str = None) -> Path:
         """获取缓存文件路径（向后兼容）"""
@@ -101,7 +109,7 @@ class CacheManager:
         ranking: Dict,
         report: str,
         start_date: str = None,
-        cache_file: str = None  # ⭐ 新增：支持指定缓存文件
+        cache_file: str = None
     ):
         """
         保存完整分析结果到 source_target
@@ -116,16 +124,32 @@ class CacheManager:
             start_date: 分析开始日期（YYYYMMDD）
             cache_file: 指定缓存文件名（如 NVDA_20251127.json）
         """
+        # ⭐ 验证 symbol
+        if not symbol or symbol.upper() == "UNKNOWN":
+            logger.error(f"无效的 symbol: '{symbol}'，跳过保存")
+            return
+        
+        symbol = symbol.upper()
+        
         if not start_date:
             start_date = datetime.now().strftime("%Y%m%d")
         
-        # ⭐ 支持指定缓存文件
+        # 确定缓存路径
         if cache_file:
             # 从文件名提取 start_date
             match = re.match(r'(\w+)_(\d{8})\.json', cache_file)
             if match:
                 start_date = match.group(2)
-            cache_path = self.output_dir / symbol / cache_file
+            
+            symbol_dir = self.output_dir / symbol
+            date_dir = symbol_dir / start_date
+            
+            # ⭐ 关键改动：仅在不存在时创建
+            if not date_dir.exists():
+                logger.debug(f"📁 创建缓存目录: {date_dir}")
+                date_dir.mkdir(parents=True, exist_ok=True)
+            
+            cache_path = date_dir / cache_file
         else:
             cache_path = self._get_output_filename(symbol, start_date)
         
@@ -141,10 +165,10 @@ class CacheManager:
                 "created_at": datetime.now().isoformat()
             }
         
-        # ⭐ 写入 source_target（计算后的完整数据 + scenario）
+        # 写入 source_target
         cached["source_target"] = {
             "timestamp": datetime.now().isoformat(),
-            "data": initial_data,  # 包含 23个原始字段 + 3个计算字段
+            "data": initial_data,
             "scenario": scenario,
             "strategies": strategies,
             "ranking": ranking,
@@ -154,7 +178,6 @@ class CacheManager:
         cached["last_updated"] = datetime.now().isoformat()
         
         # 保存缓存
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
         self._save_cache(cache_path, cached)
         logger.success(f"✅ 完整分析结果已保存: {cache_path}")
     
@@ -198,15 +221,6 @@ class CacheManager:
         """
         保存希腊值快照（支持多次 refresh）
         
-        数据格式：
-        {
-            "start_date": "2025-11-27",
-            "source_target": {...},  # 最初的完整数据
-            "snapshots_1": {...},    # 第1次 refresh
-            "snapshots_2": {...},    # 第2次 refresh
-            ...
-        }
-        
         Args:
             symbol: 股票代码
             data: 完整数据
@@ -217,15 +231,21 @@ class CacheManager:
         Returns:
             保存结果
         """
+        # ⭐ 验证 symbol
+        if not symbol or symbol.upper() == "UNKNOWN":
+            logger.error(f"无效的 symbol: '{symbol}'，跳过保存快照")
+            return {
+                "status": "error",
+                "message": f"无效的 symbol: {symbol}"
+            }
+        
+        symbol = symbol.upper()
+        
         # 确定快照文件路径
         if cache_file_name:
-            # 使用指定的缓存文件名
-            snapshot_file = self._get_output_filename(
-                symbol, 
-                cache_file_name.replace(f"{symbol}_", "").replace(".json", "")
-            )
+            date_str = cache_file_name.replace(f"{symbol}_", "").replace(".json", "")
+            snapshot_file = self._get_output_filename(symbol, date_str)
         else:
-            # 使用当前日期
             snapshot_file = self._get_output_filename(symbol)
         
         # 提取 targets 数据

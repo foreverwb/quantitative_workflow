@@ -20,17 +20,14 @@ def get_system_prompt(env_vars: dict) -> str:
 
 请严格按照以下步骤进行视觉解析和数据填充：
 
-## 1. 基础信息与索引填充 (Status & Indices)
-* **status**：如果所有 `required` 字段均成功提取，则为 `"data_ready"`，否则为 `"missing_data"`。
-* **targets.symbol**：提取图表主标的（例如 $SPY, $TSLA）。
-* **indices**：图表包含 SPX/QQQ 两者，则各自输出在 `net_gex_idx`、`spot_idx` 和 `atm_iv_idx`。
+## 1. 基础信息填充
+* **targets.symbol**：提取图表主标的（例如$NVDA）。
 
 ## 2. 墙体与 Gamma 结构 (Walls & Gamma Metrics)
 * **walls**：识别最大的 Call/Put 簇。
     * **major_wall_type**：严格使用 Schema 中的 `"call"`, `"put"`, `"N/A"`。
 * **gamma_metrics**：
-    * **net_gex**：提取原始值并标准化为 **number**。
-    * **net_gex_sign**：严格使用 `"positive_gamma"`, `"negative_gamma"`, `"neutral"`, `"N/A"`。
+    * **net_gex**：gexn or trigger 给到"Gamma翻转价位(TOTAL_VOL_Trigger/Gamma Flip)", SPOT_PRICE 在上方倾向 positive_gamma, 下方倾向negative_gamma
     * **spot_vs_trigger**：严格使用 `"above"`, `"below"`, `"near"`, `"N/A"`（将视觉上的“在附近”映射为 `"near"`）。
     * **abs_gex**：对 `nearby_peak` 和 `next_cluster_peak` 中的 `abs_gex` 字段进行标准化。
 ### ** 2.1 峰值簇结构深度解析 (Cluster Peak Analysis)**
@@ -51,8 +48,8 @@ def get_system_prompt(env_vars: dict) -> str:
 ### ** 2.2 时间维度叠加与簇强度 (Time-frame & Cluster Strength)**
 从 ABS-GEX 图表的周度/月度数据(图表 title 标注不同的 DTE)，请执行以下**“簇强度定义”**提取逻辑：
 **定义：簇强度 (Cluster Strength)**
-> **Cluster Strength = 该时间周期对应簇内最高的 ABS-GEX 单柱数值。**
-> *不要计算总面积或平均值，直接寻找该簇的最高点 (Peak Bar)。*
+**Cluster Strength = 该时间周期对应簇内最高的 ABS-GEX 单柱数值。**
+*不要计算总面积或平均值，直接寻找该簇的最高点 (Peak Bar)。*
 
 **C. 周度数据 (weekly_data)**
 * 识别最显著的周度 GEX 簇。
@@ -67,9 +64,22 @@ def get_system_prompt(env_vars: dict) -> str:
 * **vanna_dir**：将 Bullish/Bearish 映射为 `"up"`/`"down"`。
 * **iv_path**：严格使用 Schema 中定义的中文枚举值：`"升"`, `"降"`, `"平"`, `"数据不足"`。
 
-## 4. 缺失字段列表 (Missing Fields Array)
+## 4. 指数背景信息提取(indices)
+* **targets.indices**：提取图表指数标的（例如SPX, QQQ）。
+* **indices.net_gex_idx**：NET-GEX, gexn or trigger 给到"Gamma翻转价位(TOTAL_VOL_Trigger/Gamma Flip)", SPOT_PRICE 在上方倾向 "positive_gamma", 下方倾向为 "negative_gamma"
+* **indices.spot_price_idx**：指数标的现价
+* **indices.iv_7d | iv_14d**：从 `skew {SPX/QQQ} ivmid atm 7` 和 `14`  分别提取 atm iv
+
+
+## 5. 缺失字段列表 (Missing Fields Array)
 * 如果任何 `required` 字段被赋值为 `null` 或无法提取，你必须在 `missing_fields` 数组中创建一个对象来记录它。
 * **severity**：对 `spot_price`, `vol_trigger` 等核心字段使用 `"critical"`。对 `dex_same_dir_pct` 等辅助字段使用 `"high"` 或 `"medium"`。
+
+## 6.指数字段生成规则
+* 仅根据原始输入中实际出现的指数符号生成对应指数对象,输入中出现哪些指数，则输出中仅包含这些指数，且顺序一致。
+* 输入未出现的指数（例如 SPX）禁止出现在输出 JSON 中，不得自动补全、推断、填零或生成空对象。
+* indices 对象必须完全镜像输入的指数集合: output.indices.keys == input.indices.keys
+* JSON schema 中列出的指数仅表示可支持结构，并非要求必须输出。
 
 ---
 **请根据此 Schema 和逻辑，开始分析上传的图表，并以完整的 JSON 代码块形式输出结果。**

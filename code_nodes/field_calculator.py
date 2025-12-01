@@ -42,7 +42,7 @@ class FieldCalculator:
         
         # 3. gamma_metrics (11个)
         gamma_metrics = targets.get('gamma_metrics', {})
-        gamma_fields = ["vol_trigger", "spot_vs_trigger", "net_gex", "net_gex_sign", 
+        gamma_fields = ["vol_trigger", "spot_vs_trigger", "net_gex", 
                        "gap_distance_dollar"]
         for field in gamma_fields:
             if not self._is_valid_value(gamma_metrics.get(field)):

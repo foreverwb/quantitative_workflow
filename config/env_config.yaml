@@ -261,3 +261,18 @@ console:
   show_full_output: false           # 是否显示完整输出
   max_content_length: 1000          # 内容最大长度
   json_max_depth: 3                 # JSON 显示深度
+
+vision:
+  image_detail: "high"  # 图片分析精度
+  # 可选值:
+  #   - "low": 512px分辨率, 低Token消耗 (~85 tokens/图)
+  #            适合: 简单图标、Logo识别
+  #   - "auto": 自适应分辨率, 平衡精度和成本 (~170 tokens/图)
+  #            适合: 一般图表、文档扫描
+  #   - "high": 2048px+分辨率, 高精度 (~765 tokens/图)
+  #            适合: 复杂期权图表、精确数字识别（推荐）
+  # 
+  # 对于期权数据分析，推荐使用 "high":
+  #   - 更准确识别小数字（GEX值、行权价）
+  #   - 更精确的曲线识别（Gamma分布、Skew）
+  #   - 更清晰的标签读取（图表注释、Legend）

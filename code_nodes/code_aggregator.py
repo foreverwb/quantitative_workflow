@@ -51,7 +51,7 @@ def check_data_completeness(target: dict) -> dict:
     
     # 3. gamma_metrics (11个字段)
     gamma = target.get("gamma_metrics", {})
-    for field in ["vol_trigger", "spot_vs_trigger", "net_gex", "net_gex_sign", 
+    for field in ["vol_trigger", "spot_vs_trigger", "net_gex", 
                   "gap_distance_dollar"]:
         if not is_valid_value(gamma.get(field)):
             missing_fields.append(f"gamma_metrics.{field}")

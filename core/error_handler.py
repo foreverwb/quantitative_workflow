@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+from loguru import logger
 
 
 class ErrorSeverity(Enum):
@@ -73,9 +74,20 @@ class ErrorHandler:
     """错误处理器"""
     
     def __init__(self, symbol: str, output_dir: Path = Path("data/output")):
+        # ⭐ 验证 symbol 参数
+        if not symbol or symbol.strip() == "" or symbol.upper() == "UNKNOWN":
+            raise ValueError(f"无效的 symbol: '{symbol}'，无法创建错误处理器")
         self.symbol = symbol
         self.output_dir = output_dir / symbol
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ⭐ 关键改动：仅在目录不存在时创建
+        if not self.output_dir.exists():
+            logger.info(f"📁 创建输出目录: {self.output_dir}")
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            logger.debug(f"📁 输出目录已存在: {self.output_dir}")
+        
         self.error_log = []
         self.completed_steps = []
     
@@ -104,16 +116,27 @@ class ErrorHandler:
         return self._generate_error_report(error)
     
     def _save_error_context(self, error: WorkflowError):
-        """保存错误上下文到文件"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        error_file = self.output_dir / f"{self.symbol}_error_{timestamp}.json"
+        """保存错误上下文到文件（统一路径格式）"""
+        now = datetime.now()
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
+        
+        # ⭐ 创建日期子目录: data/output/NVDA/20251130/
+        date_dir = self.output_dir / date_str
+        
+        if not date_dir.exists():
+            logger.debug(f"📁 创建日期目录: {date_dir}")
+            date_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ⭐ 文件名格式: NVDA_20251130_214518_error.json
+        error_file = date_dir / f"{self.symbol}_{date_str}_{time_str}_error.json"
         
         error_context = {
             "symbol": self.symbol,
             "error": error.to_dict(),
             "completed_steps": self.completed_steps,
             "error_log": self.error_log,
-            "saved_at": datetime.now().isoformat()
+            "saved_at": now.isoformat()
         }
         
         with open(error_file, 'w', encoding='utf-8') as f:

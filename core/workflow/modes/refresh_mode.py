@@ -19,7 +19,10 @@ class RefreshMode(FullAnalysisMode):
         
         Refresh 模式流程：Agent3 → Calculator → 保存快照
         
-        注意：Refresh 模式不使用 Aggregator，不合并历史数据
+        特点：
+        - 不使用 Aggregator（不合并历史数据）
+        - 直接对当前数据进行计算
+        - 保存为新的快照（snapshots_N）
         
         Args:
             symbol: 股票代码
@@ -31,79 +34,110 @@ class RefreshMode(FullAnalysisMode):
         """
         logger.info(f"📸 [刷新快照模式] 开始刷新 {symbol}")
         
-        # 1. 扫描图片
-        images = self.scan_images(data_folder)
-        
-        if not images:
+        try:
+            # 1. 扫描图片
+            images = self.scan_images(data_folder)
+            
+            if not images:
+                return {
+                    "status": "error",
+                    "message": f"文件夹 {data_folder} 中未找到图片"
+                }
+            
+            logger.info(f"📊 扫描到 {len(images)} 张图片")
+            
+            # 2. Agent3 数据校验
+            agent3_result = self._run_agent3(symbol, images)
+            
+            # 3. 字段计算（Refresh 专用，跳过 Aggregator）
+            calculated_result = self._run_calculator_for_refresh(agent3_result, symbol)
+            
+            # 4. 检查数据完整性
+            data_status = calculated_result.get("data_status")
+            
+            if data_status != "ready":
+                return {
+                    "status": "error",
+                    "message": "数据不完整，无法保存快照",
+                    "data_status": data_status,
+                    "validation": calculated_result.get("validation", {}),
+                    "missing_fields": calculated_result.get("validation", {}).get("missing_fields", [])
+                }
+            
+            # 5. 保存快照（作为 snapshots_N）
+            snapshot_result = self.cache_manager.save_greeks_snapshot(
+                symbol=symbol,
+                data=calculated_result,
+                note="盘中刷新",
+                is_initial=False,  # refresh 不是初始数据
+                cache_file_name=self.engine.cache_file
+            )
+            
+            # 6. 生成摘要
+            snapshot = snapshot_result.get("snapshot", {})
+            summary = self._generate_snapshot_summary(snapshot)
+            
+            logger.success("✅ 快照刷新完成")
+            
             return {
-                "status": "error",
-                "message": f"文件夹 {data_folder} 中未找到图片"
+                "status": "success",
+                "mode": "refresh",
+                "snapshot": snapshot,
+                "snapshot_summary": summary,
+                "total_snapshots": snapshot_result.get("total_snapshots", 0)
             }
         
-        logger.info(f"📊 扫描到 {len(images)} 张图片")
-        
-        # 2. Agent3 数据校验
-        agent3_result = self._run_agent3(symbol, images)
-        
-        # 3. Calculator（直接计算，跳过 Aggregator）
-        calculated_result = self._run_calculator_direct(agent3_result, symbol)
-        
-        # 4. 解析数据
-        calculated_data = self.safe_parse_json(calculated_result.get("result"))
-        
-        # 5. 检查数据完整性
-        if calculated_data.get("data_status") != "ready":
+        except Exception as e:
+            logger.exception("❌ 刷新快照失败")
             return {
                 "status": "error",
-                "message": "数据不完整，无法保存快照",
-                "validation": calculated_data.get("validation", {}),
-                "missing_fields": calculated_data.get("validation", {}).get("missing_fields", [])
+                "message": f"刷新失败: {str(e)}"
             }
-        
-        # 6. 保存快照（作为 snapshots_N）
-        snapshot_result = self.cache_manager.save_greeks_snapshot(
-            symbol=symbol,
-            data=calculated_data,
-            note="盘中刷新",
-            is_initial=False,  # refresh 不是初始数据
-            cache_file=self.engine.cache_file  # ⭐ 传递 cache_file
-        )
-        
-        # 7. 生成摘要
-        snapshot = snapshot_result.get("snapshot", {})
-        summary = self._generate_snapshot_summary(snapshot)
-        
-        logger.success("✅ 快照刷新完成")
-        
-        return {
-            "status": "success",
-            "mode": "refresh",
-            "snapshot": snapshot,
-            "snapshot_key": snapshot_result.get("snapshot_key"),
-            "snapshot_summary": summary,
-            "total_snapshots": snapshot_result.get("total_snapshots", 0)
-        }
     
-    def _run_calculator(self, data: Dict) -> Dict:
+    def _run_calculator_for_refresh(self, agent3_result: Dict, symbol: str) -> Dict:
         """
-        运行字段计算器
+        运行字段计算器（Refresh 专用）
+        
+        与 FullAnalysisMode._run_calculator 的区别：
+        - 跳过 Aggregator（不合并历史数据）
+        - 直接对 Agent3 结果进行计算
         
         Args:
-            data: 聚合后的数据
+            agent3_result: Agent3 返回的原始数据
+            symbol: 股票代码
             
         Returns:
             计算后的数据
         """
         from code_nodes.field_calculator import main as calculator_main
         
-        result = self.agent_executor.execute_code_node(
-            node_name="Calculator",
-            func=calculator_main,
-            aggregated_data=data,
-            **self.env_vars
-        )
+        logger.info("🔧 [Refresh] 计算衍生字段（跳过 Aggregator）")
         
-        return self.safe_parse_json(result["result"])
+        # 构造 Calculator 期望的输入格式
+        # Calculator 期望 aggregated_data 参数
+        calculator_input = {
+            "result": agent3_result  # 模拟 Aggregator 的输出格式
+        }
+        
+        try:
+            result = self.agent_executor.execute_code_node(
+                node_name="Calculator",
+                func=calculator_main,
+                description="计算 EM1$, gap_distance_em1, cluster_strength_ratio",
+                aggregated_data=calculator_input,
+                symbol=symbol,
+                **self.env_vars
+            )
+            
+            logger.success("✅ [Refresh] 字段计算完成")
+            return result
+        
+        except Exception as e:
+            logger.error(f"❌ [Refresh] Calculator 执行失败: {str(e)}")
+            return {
+                "data_status": "error",
+                "error_message": str(e)
+            }
     
     def _generate_snapshot_summary(self, snapshot: Dict) -> str:
         """
@@ -116,9 +150,7 @@ class RefreshMode(FullAnalysisMode):
             摘要字符串
         """
         lines = [
-            f"快照 #{snapshot.get('snapshot_id', 0)}",
-            f"时间: {snapshot.get('timestamp', '')[:19]}",
-            f"类型: {snapshot.get('type', '')}",
+            f"快照时间: {snapshot.get('timestamp', '')[:19]}",
             ""
         ]
         
@@ -126,17 +158,24 @@ class RefreshMode(FullAnalysisMode):
             lines.append(f"备注: {snapshot['note']}")
             lines.append("")
         
-        lines.extend([
-            f"现价: ${snapshot.get('spot_price', 'N/A')}",
-            f"EM1$: ${snapshot.get('em1_dollar', 'N/A')}",
-            f"Vol Trigger: ${snapshot.get('vol_trigger', 'N/A')}",
-            f"状态: {snapshot.get('spot_vs_trigger', 'N/A')}",
-            f"NET-GEX: {snapshot.get('net_gex', 'N/A')}",
-            ""
-        ])
+        # 提取 targets 数据
+        targets = snapshot.get("targets", {})
         
+        if targets:
+            gamma_metrics = targets.get('gamma_metrics', {})
+            
+            lines.extend([
+                f"现价: ${targets.get('spot_price', 'N/A')}",
+                f"EM1$: ${targets.get('em1_dollar', 'N/A')}",
+                f"Vol Trigger: ${gamma_metrics.get('vol_trigger', 'N/A')}",
+                f"Gamma 状态: {gamma_metrics.get('spot_vs_trigger', 'N/A')}",
+                f"NET-GEX: {gamma_metrics.get('net_gex', 'N/A')}",
+                ""
+            ])
+        
+        # 如果有变化记录
         if snapshot.get('changes'):
-            lines.append("变化:")
+            lines.append("📈 数据变化:")
             for field, change in snapshot['changes'].items():
                 pct_str = f" ({change['change_pct']:+.2f}%)" if 'change_pct' in change else ""
                 lines.append(f"  • {field}: {change['old']} → {change['new']}{pct_str}")

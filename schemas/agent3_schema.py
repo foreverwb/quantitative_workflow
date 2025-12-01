@@ -50,7 +50,6 @@ def get_schema() -> dict:
             "vol_trigger",
             "spot_vs_trigger",
             "net_gex",
-            "net_gex_sign",
             "nearby_peak",
             "next_cluster_peak",
             "gap_distance_dollar",
@@ -63,12 +62,7 @@ def get_schema() -> dict:
               "type": "string",
               "enum": ["above", "below", "near", "N/A"]
             },
-            "net_gex": {"type": "number"},
-            "net_gex_sign": {
-              "type": "string",
-              "enum": ["positive_gamma", "negative_gamma", "neutral", "N/A"]
-            },
-
+            "net_gex": {"type": "string", "enum": ["positive_gamma", "negative_gamma"]},
             "nearby_peak": {
               "type": "object",
               "required": ["price", "abs_gex"],
@@ -163,22 +157,23 @@ def get_schema() -> dict:
 
     "indices": {
       "type": "object",
-      "required": ["spx", "qqq"],
       "properties": {
-        "spx": {
+        "SPX": {
           "type": "object",
           "properties": {
-            "net_gex_idx": {"type": "number"},
-            "spot_idx": {"type": "number"},
-            "atm_iv_idx": {"type": "number"}
+            "net_gex_idx": {"type": "string", "enum": ["positive_gamma", "negative_gamma"]},
+            "spot_price_idx": {"type": "number"},
+            "iv_7d": {"type": "number"},
+            "iv_14d": {"type": "number"}
           }
         },
-        "qqq": {
+        "QQQ": {
           "type": "object",
           "properties": {
-            "net_gex_idx": {"type": "number"},
-            "spot_idx": {"type": "number"},
-            "atm_iv_idx": {"type": "number"}
+            "net_gex_idx":{"type": "string", "enum": ["positive_gamma", "negative_gamma"]},
+            "spot_price_idx": {"type": "number"},
+            "iv_7d": {"type": "number"},
+            "iv_14d": {"type": "number"}
           }
         }
       }
