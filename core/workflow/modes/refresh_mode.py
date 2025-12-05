@@ -16,7 +16,8 @@ class RefreshMode(FullAnalysisMode):
     def execute(
         self, 
         symbol: str, 
-        data_folder: Path, 
+        data_folder: Path,
+        state: Dict[str, Any],  #  添加 state 参数（与基类保持一致）
         market_params: Dict = None,
         dyn_params: Dict = None
     ) -> Dict[str, Any]:
@@ -33,7 +34,9 @@ class RefreshMode(FullAnalysisMode):
         Args:
             symbol: 股票代码
             data_folder: 数据文件夹路径
-            state: 当前状态（保留兼容）
+            state: 当前状态（保留兼容，本模式不使用）
+            market_params: 市场参数 (vix, ivr, iv30, hv20)
+            dyn_params: 动态参数 (dyn_strikes, scenario, ...)
             
         Returns:
             快照结果

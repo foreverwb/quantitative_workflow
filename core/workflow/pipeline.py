@@ -23,6 +23,7 @@ from utils.console_printer import (
     print_info,
     print_warning
 )
+from utils.config_loader import expand_config_to_env_vars
 from core.error_handler import ErrorHandler, WorkflowError, ErrorCategory, ErrorSeverity
 
 
@@ -50,7 +51,8 @@ class AnalysisPipeline:
         """
         self.agent_executor = agent_executor
         self.cache_manager = cache_manager
-        self.env_vars = env_vars
+        #展开 config 到扁平化 env_vars（供 code_nodes 使用）
+        self.env_vars = expand_config_to_env_vars(env_vars)
         self.enable_pretty_print = enable_pretty_print
         self.cache_file = cache_file  
         self.error_handler = error_handler  

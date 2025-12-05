@@ -125,6 +125,9 @@ pw_calculation:
     base: 0.3
     dex_coef: 0.1                    # DEX 调整系数
     vanna_coef: 0.2                  # Vanna 调整系数
+    vanna_weight_high: 1.0           # Vanna权重 - 高
+    vanna_weight_medium: 0.6         # Vanna权重 - 中
+    vanna_weight_low: 0.3            # Vanna权重 - 低
     min: 0.25
     max: 0.75
   

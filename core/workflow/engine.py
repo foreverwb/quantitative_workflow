@@ -11,6 +11,7 @@ from core.model_client import ModelClientManager
 from .state_manager import StateManager
 from .cache_manager import CacheManager
 from .agent_executor import AgentExecutor
+from utils.config_loader import expand_config_to_env_vars
 
 
 class WorkflowEngine:
@@ -26,7 +27,8 @@ class WorkflowEngine:
             cache_file: 指定缓存文件名（如 NVDA_20251127.json）
         """
         self.model_client = model_client
-        self.env_vars = env_vars
+        # 展开 config 到扁平化 env_vars（供 code_nodes 使用）
+        self.env_vars = expand_config_to_env_vars(env_vars)
         self.cache_file = cache_file  # ⭐ 新增：支持指定缓存文件
         
         # 依赖注入
@@ -34,7 +36,7 @@ class WorkflowEngine:
         self.cache_manager = CacheManager()
         self.agent_executor = AgentExecutor(
             model_client, 
-            env_vars, 
+            self.env_vars,  # 使用展开后的 env_vars
             enable_pretty_print=True,
             show_full_output=False
         )
@@ -60,7 +62,14 @@ class WorkflowEngine:
         
         return self._modes
     
-    def run(self, symbol: str, data_folder: Path, mode: str = "full") -> Dict[str, Any]:
+    def run(
+        self, 
+        symbol: str, 
+        data_folder: Path, 
+        mode: str = "full",
+        market_params: Dict = None,  # 市场参数
+        dyn_params: Dict = None      # 动态参数
+    ) -> Dict[str, Any]:
         """
         运行工作流 - 核心入口
         
@@ -68,6 +77,8 @@ class WorkflowEngine:
             symbol: 股票代码
             data_folder: 数据文件夹路径
             mode: 运行模式（full/update/refresh）
+            market_params: 市场参数 (vix, ivr, iv30, hv20)
+            dyn_params: 动态参数 (dyn_strikes, scenario, ...)
             
         Returns:
             执行结果
@@ -88,9 +99,15 @@ class WorkflowEngine:
         if not mode_handler:
             raise ValueError(f"未知模式: {mode}")
         
-        # 3. 执行模式
+        # 3. 执行模式（传递市场参数）
         try:
-            result = mode_handler.execute(symbol, data_folder, state)
+            result = mode_handler.execute(
+                symbol, 
+                data_folder, 
+                state,
+                market_params=market_params,
+                dyn_params=dyn_params
+            )
             
             # 4. 记录历史
             self.state_manager.add_history_entry(symbol, {

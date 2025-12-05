@@ -27,7 +27,7 @@ class AnalyzeCommand(BaseCommand):
         output: str = None,
         mode: str = 'full',
         cache: str = None,
-        **kwargs  #接收额外参数（market_params, dyn_params）
+        **kwargs  # 接收额外参数（包括 market_params, dyn_params）
     ) -> Dict[str, Any]:
         """
         执行分析命令
@@ -40,6 +40,7 @@ class AnalyzeCommand(BaseCommand):
             cache: 缓存文件名
             **kwargs: 额外参数
                 - market_params: Dict[str, float] (vix, ivr, iv30, hv20)
+                - dyn_params: Dict (从缓存加载的动态参数，仅完整分析模式)
         """
         # 1. 验证股票代码
         is_valid, result = self.validate_symbol(symbol)
@@ -48,10 +49,9 @@ class AnalyzeCommand(BaseCommand):
             self.console.print("[yellow]💡 示例: python app.py analyze -s AAPL --vix 18.5 --ivr 50 --iv30 30 --hv20 25[/yellow]")
             sys.exit(1)
         
-        #2. 提取并验证市场参数
+        # 2. 提取市场参数
         market_params = kwargs.get('market_params')
-        dyn_params = kwargs.get('dyn_params')
-        
+        dyn_params = kwargs.get('dyn_params')  #  从缓存加载的动态参数
         
         # 3. 判断模式
         if not folder:
@@ -113,7 +113,7 @@ class AnalyzeCommand(BaseCommand):
                 mode=mode,
                 cache=cache,
                 pre_calc=pre_calc_params,
-                market_params=market_params  # 🆕 传递市场参数用于保存
+                market_params=market_params  #  传递市场参数用于保存
             )
     
     def _generate_command_list(self, symbol: str, pre_calc: Dict) -> Dict[str, Any]:
@@ -192,13 +192,16 @@ class AnalyzeCommand(BaseCommand):
             if cache_path:
                 # 提取文件名
                 cache_filename = Path(cache_path).name
-    
-                self.console.print(f"[green]✅ 缓存已创建: {cache_path}[/green]")
                 
-                # 简化的命令提示（无需市场参数）
-                self.console.print(f"\n[yellow]💡 抓取数据后执行分析:[/yellow]")
+                self.console.print(f"[green]✅ 缓存已创建: {cache_path}[/green]")
+                self.console.print(f"[dim]   后续分析将自动从此文件读取市场参数[/dim]")
+                
+                #  简化的命令提示（不再需要市场参数）
+                self.console.print(f"\n[yellow]💡 提示：抓取数据后，请使用以下命令执行分析:[/yellow]")
                 self.console.print(
-                    f"[cyan]   python app.py analyze -s {symbol.upper()} -f <数据文件夹> --cache {cache_filename}[/cyan]"
+                    f"[cyan]   python app.py analyze -s {symbol.upper()} "
+                    f"-f <数据文件夹路径> "
+                    f"--cache {cache_filename}[/cyan]"
                 )
             else:
                 self.console.print("[red]⚠️ 缓存初始化失败（可能已存在）[/red]")
@@ -222,7 +225,7 @@ class AnalyzeCommand(BaseCommand):
         mode: str,
         cache: str,
         pre_calc: Dict,
-        market_params: Dict = None
+        market_params: Dict = None  #  新增参数
     ) -> Dict[str, Any]:
         """
         执行完整分析
@@ -234,12 +237,13 @@ class AnalyzeCommand(BaseCommand):
             mode: 运行模式
             cache: 缓存文件名
             pre_calc: 动态参数字典
+            market_params: 市场参数（可选，用于保存到缓存）
         """
         # 验证参数
         if mode == 'update' and not cache:
             self.print_error("update 模式必须指定 --cache 参数")
             self.console.print(f"[yellow]💡 示例:[/yellow]")
-            self.console.print(f"[cyan]   python app.py analyze -s {symbol.upper()} -f {folder} --mode update --cache {symbol.upper()}_20251129.json --vix 18.5 --ivr 50 --iv30 30 --hv20 25[/cyan]")
+            self.console.print(f"[cyan]   python app.py analyze -s {symbol.upper()} -f {folder} --mode update --cache {symbol.upper()}_20251129.json[/cyan]")
             sys.exit(1)
         
         # 验证缓存文件
@@ -256,10 +260,11 @@ class AnalyzeCommand(BaseCommand):
         
         # 打印标题
         mode_desc = "完整分析" if mode == "full" else "增量补齐"
+        scenario = pre_calc.get('scenario', 'N/A')
         self.console.print(Panel.fit(
             f"[bold blue]Swing Quant Workflow[/bold blue]\n"
             f"[dim]期权分析策略系统 - {mode_desc}[/dim]\n"
-            f"[dim]市场场景: {pre_calc['scenario']}[/dim]",
+            f"[dim]市场场景: {scenario}[/dim]",
             border_style="blue"
         ))
         
@@ -274,7 +279,10 @@ class AnalyzeCommand(BaseCommand):
         
         # 创建引擎
         engine = self.create_engine(cache_file=cache)
-        market_params = self.env_vars.get('market_params', {})
+        
+        #  优先使用传入的 market_params，否则从 env_vars 获取
+        if not market_params:
+            market_params = self.env_vars.get('market_params', {})
         
         self.console.print(f"\n[green]🚀 开始{mode_desc} {symbol.upper()}[/green]\n")
         
@@ -286,13 +294,13 @@ class AnalyzeCommand(BaseCommand):
             ) as progress:
                 task = progress.add_task("正在分析...", total=None)
                 
-                #传递 pre_calc 参数
+                #  传递市场参数和动态参数
                 result = engine.run(
                     symbol=symbol.upper(),
                     data_folder=folder_path,
                     mode=mode,
-                    pre_calc=pre_calc,  #关键改动
                     market_params=market_params,
+                    dyn_params=pre_calc  #  pre_calc 作为 dyn_params 传递
                 )
                 
                 progress.update(task, completed=True)

@@ -20,7 +20,7 @@ class RefreshCommand(BaseCommand):
         symbol: str,
         folder: str,
         cache: str,
-        **kwargs
+        **kwargs  # 接收 market_params, dyn_params
     ) -> Dict[str, Any]:
         """
         执行刷新快照
@@ -29,10 +29,17 @@ class RefreshCommand(BaseCommand):
             symbol: 股票代码
             folder: 数据文件夹路径
             cache: 缓存文件名（必需）
-            
+            **kwargs: 额外参数
+                - market_params: 市场参数 (vix, ivr, iv30, hv20)
+                - dyn_params: 动态参数 (dyn_strikes, scenario, ...)
+                
         Returns:
             执行结果字典
         """
+        # 提取市场参数
+        market_params = kwargs.get('market_params')
+        dyn_params = kwargs.get('dyn_params')
+        
         # ============= 1. 参数验证 =============
         
         # 1.1 验证股票代码
@@ -93,7 +100,9 @@ class RefreshCommand(BaseCommand):
                 result = engine.run(
                     symbol=symbol.upper(),
                     data_folder=folder_path,
-                    mode="refresh"
+                    mode="refresh",
+                    market_params=market_params,  # 传递市场参数
+                    dyn_params=dyn_params         # 传递动态参数
                 )
                 
                 progress.update(task, completed=True)

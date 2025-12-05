@@ -153,6 +153,21 @@ def refresh(symbol: str, folder: str, cache: str):
     model_client = ModelClientFactory.create_from_config()
     env_vars = {'config': config}  # 传递 config 实例而非展平字典
     
+    cache_manager = CacheManager()
+    cached_params = cache_manager.load_market_params_from_cache(symbol.upper(), cache)
+    
+    if not cached_params:
+        console.print(f"[red]❌ 无法从缓存文件 {cache} 读取市场参数[/red]")
+        console.print("[yellow]💡 请确保缓存文件存在且包含市场参数[/yellow]")
+        sys.exit(1)
+    
+    env_vars['market_params'] = cached_params['market_params']
+    env_vars['dyn_params'] = cached_params['dyn_params']
+    
+    mp = cached_params['market_params']
+    dp = cached_params['dyn_params']
+    console.print(f"[green]✅ 从缓存加载市场参数[/green]")
+    console.print(f"[dim]   VIX={mp.get('vix')}, IVR={mp.get('ivr')}, 场景={dp.get('scenario')}[/dim]")
     # 创建命令处理器
     command = RefreshCommand(console, model_client, env_vars)
     
@@ -161,7 +176,9 @@ def refresh(symbol: str, folder: str, cache: str):
         command.execute(
             symbol=symbol,
             folder=folder,
-            cache=cache
+            cache=cache,
+            market_params=env_vars['market_params'],
+            dyn_params=env_vars['dyn_params']
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]⚠️ 用户中断执行[/yellow]")
