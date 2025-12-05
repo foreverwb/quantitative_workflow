@@ -787,3 +787,52 @@ class CacheManager:
         except Exception as e:
             logger.error(f"❌ 初始化缓存失败: {e}")
             return None
+        
+    def load_market_params_from_cache(self, symbol: str, cache_file: str) -> Optional[Dict]:
+        """
+        从指定缓存文件加载市场参数
+        
+        Args:
+            symbol: 股票代码
+            cache_file: 缓存文件名（如 NVDA_20251130.json）
+        
+        Returns:
+            包含 market_params 和 dyn_params 的字典，不存在返回 None
+        """
+        # 从文件名提取日期
+        match = re.match(r'(\w+)_(\d{8})\.json', cache_file)
+        if not match:
+            logger.error(f"无效的缓存文件名格式: {cache_file}，应为 SYMBOL_YYYYMMDD.json")
+            return None
+        
+        start_date = match.group(2)
+        
+        # 构造完整路径
+        cache_path = self.output_dir / symbol / start_date / cache_file
+        
+        if not cache_path.exists():
+            logger.warning(f"缓存文件不存在: {cache_path}")
+            return None
+        
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                cached = json.load(f)
+            
+            if "market_params" not in cached:
+                logger.warning(f"缓存文件缺少 market_params 字段")
+                return None
+            
+            if "dyn_params" not in cached:
+                logger.warning(f"缓存文件缺少 dyn_params 字段")
+                return None
+            
+            logger.info(f"✅ 从缓存加载市场参数: {cache_path}")
+            
+            return {
+                "market_params": cached["market_params"],
+                "dyn_params": cached["dyn_params"]
+            }
+        
+        except Exception as e:
+            logger.error(f"加载市场参数失败: {e}")
+            return None

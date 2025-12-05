@@ -373,6 +373,9 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         result_str = aggregated_data.get('result')
         if isinstance(result_str, str):
             data = json.loads(result_str)
+        elif isinstance(result_str, dict):
+            # Refresh 模式：result 直接是字典
+            data = result_str
         else:
             data = aggregated_data
         
@@ -383,7 +386,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         calculator = FieldCalculator(config, market_params=market_params)
         
         # 验证原始字段
-        validation = calculator.validate_raw_fields(data.get('result'))
+        validation = calculator.validate_raw_fields(data)
         
         print(f"\n📊 验证结果:")
         print(f"  • 完成率: {validation['completion_rate']}%")

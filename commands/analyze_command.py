@@ -27,7 +27,7 @@ class AnalyzeCommand(BaseCommand):
         output: str = None,
         mode: str = 'full',
         cache: str = None,
-        **kwargs  #接收额外参数（包括 market_params）
+        **kwargs  #接收额外参数（market_params, dyn_params）
     ) -> Dict[str, Any]:
         """
         执行分析命令
@@ -50,43 +50,70 @@ class AnalyzeCommand(BaseCommand):
         
         #2. 提取并验证市场参数
         market_params = kwargs.get('market_params')
+        dyn_params = kwargs.get('dyn_params')
         
-        if not market_params:
-            self.print_error("缺少必需的市场参数 (vix, ivr, iv30, hv20)")
-            self.console.print("[yellow]💡 请使用 --vix, --ivr, --iv30, --hv20 参数[/yellow]")
-            sys.exit(1)
-        
-        try:
-            # 验证参数合法性
-            MarketStateCalculator.validate_params(market_params)
-            
-            # 计算动态参数
-            pre_calc_params = MarketStateCalculator.calculate_fetch_params(
-                vix=market_params['vix'],
-                ivr=market_params['ivr'],
-                iv30=market_params['iv30'],
-                hv20=market_params['hv20']
-            )
-            
-            logger.info(f"✅ 市场状态计算完成: {pre_calc_params['scenario']}")
-            
-        except ValueError as e:
-            self.print_error(f"市场参数验证失败: {e}")
-            sys.exit(1)
         
         # 3. 判断模式
         if not folder:
-            # 模式A: 生成命令清单（Agent2）
+            # ========== 模式A: 生成命令清单（Agent2）==========
+            # 必须有市场参数
+            if not market_params:
+                self.print_error("生成命令清单时必须指定市场参数 (--vix, --ivr, --iv30, --hv20)")
+                sys.exit(1)
+            
+            try:
+                # 验证参数合法性
+                MarketStateCalculator.validate_params(market_params)
+                
+                # 计算动态参数
+                pre_calc_params = MarketStateCalculator.calculate_fetch_params(
+                    vix=market_params['vix'],
+                    ivr=market_params['ivr'],
+                    iv30=market_params['iv30'],
+                    hv20=market_params['hv20']
+                )
+                
+                logger.info(f"✅ 市场状态计算完成: {pre_calc_params['scenario']}")
+                
+            except ValueError as e:
+                self.print_error(f"市场参数验证失败: {e}")
+                sys.exit(1)
+            
             return self._generate_command_list(symbol, pre_calc_params)
+        
         else:
-            # 模式B: 完整分析
+            # ========== 模式B: 完整分析（Agent3 → Pipeline）==========
+            # 优先使用从缓存加载的动态参数
+            if dyn_params:
+                # 从缓存加载的参数
+                pre_calc_params = dyn_params
+                logger.info(f"✅ 使用缓存中的动态参数: {pre_calc_params.get('scenario', 'N/A')}")
+            elif market_params:
+                # 如果用户显式提供了市场参数，重新计算（兼容旧用法）
+                try:
+                    MarketStateCalculator.validate_params(market_params)
+                    pre_calc_params = MarketStateCalculator.calculate_fetch_params(
+                        vix=market_params['vix'],
+                        ivr=market_params['ivr'],
+                        iv30=market_params['iv30'],
+                        hv20=market_params['hv20']
+                    )
+                    logger.info(f"✅ 市场状态计算完成: {pre_calc_params['scenario']}")
+                except ValueError as e:
+                    self.print_error(f"市场参数验证失败: {e}")
+                    sys.exit(1)
+            else:
+                self.print_error("缺少市场参数，请指定 --cache 参数从缓存加载")
+                sys.exit(1)
+            
             return self._full_analysis(
                 symbol=symbol,
                 folder=folder,
                 output=output,
                 mode=mode,
                 cache=cache,
-                pre_calc=pre_calc_params  #传递动态参数
+                pre_calc=pre_calc_params,
+                market_params=market_params  # 🆕 传递市场参数用于保存
             )
     
     def _generate_command_list(self, symbol: str, pre_calc: Dict) -> Dict[str, Any]:
@@ -163,18 +190,15 @@ class AnalyzeCommand(BaseCommand):
                 dyn_params=pre_calc
             )
             if cache_path:
+                # 提取文件名
+                cache_filename = Path(cache_path).name
+    
                 self.console.print(f"[green]✅ 缓存已创建: {cache_path}[/green]")
-                self.console.print(f"[dim]   后续分析将自动更新此文件[/dim]")
                 
-                self.console.print(f"\n[yellow]💡 提示：后续分析时请使用以下命令（自动复用此缓存）:[/yellow]")
+                # 简化的命令提示（无需市场参数）
+                self.console.print(f"\n[yellow]💡 抓取数据后执行分析:[/yellow]")
                 self.console.print(
-                    f"[cyan]   python app.py analyze -s {symbol.upper()} "
-                    f"-f <数据文件夹路径> "
-                    f"--cache {cache_path}"
-                    f"--vix {market_params.get('vix')} "
-                    f"--ivr {market_params.get('ivr')} "
-                    f"--iv30 {market_params.get('iv30')} "
-                    f"--hv20 {market_params.get('hv20')}[/cyan]"
+                    f"[cyan]   python app.py analyze -s {symbol.upper()} -f <数据文件夹> --cache {cache_filename}[/cyan]"
                 )
             else:
                 self.console.print("[red]⚠️ 缓存初始化失败（可能已存在）[/red]")
@@ -197,7 +221,8 @@ class AnalyzeCommand(BaseCommand):
         output: str,
         mode: str,
         cache: str,
-        pre_calc: Dict  #新增参数
+        pre_calc: Dict,
+        market_params: Dict = None
     ) -> Dict[str, Any]:
         """
         执行完整分析
