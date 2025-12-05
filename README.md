@@ -1,26 +1,38 @@
-### STEP-1：生成命令清单（必须指定市场参数）
-
-python app.py analyze -s {SYMBOL} --vix 18.5 --ivr 65 --iv30 42.8 --hv20 38.2```
-
-#### → 创建缓存 {SYMBOL + datetime}.json，包含 market_params 和 dyn_params
-
-### STEP-2：完整分析（从缓存读取市场参数，无需再次指定）
-
+### Shell Config
 ```
-python app.py analyze -s {SYMBOL} -f ./data/images --cache {SYMBOL + datetime}.json
+cd ~/quantitative_workflow  
+echo "alias sq='python $(pwd)/app.py'" >> ~/.zshrc
+echo "alias analyze='python $(pwd)/app.py analyze'" >> ~/.zshrc
+echo "alias update='python $(pwd)/app.py update'" >> ~/.zshrc
+echo "alias refresh='python $(pwd)/app.py refresh'" >> ~/.zshrc
+source ~/.zshrc
 ```
 
-### 增量更新
-
+### 生成命令清单（两种方式）
 ```
-python app.py analyze -s {SYMBOL} -f ./data/images --mode update --cache {SYMBOL + datetime}.json
+analyze symbol -p '{"vix":18,"ivr":65,"iv30":42,"hv20":38}'  # JSON 字符串
+analyze symbol -p params.json                                  # JSON 文件
+```
+
+### 完整分析
+```
+analyze symbol -f ./data/images -c symbol_20251206.json
+```
+
+### 增量更新（独立命令，更简洁）
+```
+update symbol -f ./data/images -c symbol_20251206.json
 ```
 
 ### 刷新快照
+```
+refresh symbol -f ./data/images -c symbol_20251206.json
+```
+### 生成参数模板
+```
+params --example -o symbol.json
+```
 
-```
-python app.py refresh -s {SYMBOL} -f ./data/images --cache {SYMBOL + datetime}.json
-```
 
 ### 数据流向
 
