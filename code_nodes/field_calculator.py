@@ -30,7 +30,7 @@ class FieldCalculator:
             market_params: 市场参数 (vix, ivr, iv30, hv20, beta, earning_date)
             event_data: 事件检测数据（包含 days_to_earnings）
         """
-        # 一次性获取所有配置
+        # ⭐ 一次性获取所有配置
         self.gamma_config = config_loader.get_section('gamma')
         self.beta_config = config_loader.get_section('beta')
         self.market_params = market_params or {}
@@ -75,6 +75,61 @@ class FieldCalculator:
         
         # 4. 返回默认值
         return self.beta_config.get('default_beta', 1.0)
+    
+    def calculate_t_scale(self) -> Tuple[float, Dict]:
+        """
+        计算波动率时间缩放系数 T_scale
+        
+        T_scale = (HV20 / IV30)^0.8
+        
+        逻辑:
+        - IV > HV (溢价高) -> T_scale < 1 -> 缩短持仓时间
+        - IV < HV (折价)   -> T_scale > 1 -> 延长持仓时间
+        
+        Returns:
+            (t_scale, details_dict) 元组
+        """
+        hv20 = self.market_params.get('hv20', 30.0)
+        iv30 = self.market_params.get('iv30', 30.0)
+        
+        # 防止除零
+        if iv30 <= 0:
+            iv30 = 30.0
+        if hv20 <= 0:
+            hv20 = 30.0
+        
+        # T_scale = (HV20 / IV30)^0.8
+        t_scale = (hv20 / iv30) ** 0.8
+        
+        # 钳制到合理范围 [0.5, 2.0]
+        t_scale_raw = t_scale
+        t_scale = max(0.5, min(2.0, t_scale))
+        
+        # VRP (Volatility Risk Premium)
+        vrp = iv30 / hv20 if hv20 > 0 else 1.0
+        
+        # 波动率状态判断
+        if t_scale < 0.9:
+            vol_state = "高IV溢价"
+            vol_implication = "市场预期波动大，建议缩短持仓"
+        elif t_scale > 1.1:
+            vol_state = "低IV溢价"
+            vol_implication = "市场预期平静，可延长持仓"
+        else:
+            vol_state = "IV/HV均衡"
+            vol_implication = "正常持仓周期"
+        
+        details = {
+            't_scale': round(t_scale, 3),
+            't_scale_raw': round(t_scale_raw, 3),
+            'hv20': hv20,
+            'iv30': iv30,
+            'vrp': round(vrp, 3),
+            'vol_state': vol_state,
+            'vol_implication': vol_implication
+        }
+        
+        return round(t_scale, 3), details
     
     def get_days_to_earnings(self) -> Optional[int]:
         """
@@ -217,7 +272,7 @@ class FieldCalculator:
         }
     
     def calculate_all(self, data: Dict) -> Dict:
-        """计算所有衍生字段（3个 + 指数）"""
+        """计算所有衍生字段（3个 + 指数 + 波动率指标）"""
         targets = data.get('targets', {})
         if isinstance(targets, str):
             try:
@@ -240,12 +295,72 @@ class FieldCalculator:
         # 计算指数 EM1$
         targets = self._calculate_indices_em1(targets)
         
+        # 🆕 计算 T_scale 并聚合波动率指标
+        targets = self._aggregate_volatility_metrics(targets)
+        
         # 验证计算结果
         validation = self._validate_calculations(targets)
         targets['_calculation_log'] = validation
         
         data['targets'] = targets
         return data
+    
+    def _aggregate_volatility_metrics(self, targets: Dict) -> Dict:
+        """
+        聚合波动率相关指标供下游使用
+        
+        包含:
+        - lambda_factor: EM1$ 扩展系数
+        - t_scale: 波动率时间缩放系数
+        - 相关细节用于策略决策
+        """
+        # 计算 T_scale
+        t_scale, t_scale_details = self.calculate_t_scale()
+        
+        # 从 _lambda_details 提取 lambda_factor
+        lambda_details = targets.get('_lambda_details', {})
+        lambda_factor = lambda_details.get('lambda_factor', 1.0)
+        
+        # 聚合波动率指标
+        volatility_metrics = {
+            # 核心指标（供下游直接使用）
+            'lambda_factor': lambda_factor,
+            't_scale': t_scale,
+            
+            # Lambda 细节
+            'lambda_details': {
+                'beta': lambda_details.get('beta', 1.0),
+                'beta_source': lambda_details.get('beta_source', 'default'),
+                'k_sys': lambda_details.get('k_sys', 0.5),
+                'k_idiosync': lambda_details.get('k_idiosync', 0.5),
+                'vix_premium': lambda_details.get('vix_premium', 0),
+                'ivr_premium': lambda_details.get('ivr_premium', 0),
+                'days_to_earnings': lambda_details.get('days_to_earnings'),
+                'earning_source': lambda_details.get('earning_source', 'none'),
+                'raw_em1': lambda_details.get('raw_em1', 0)
+            },
+            
+            # T_scale 细节
+            't_scale_details': t_scale_details,
+            
+            # 市场参数快照
+            'market_snapshot': {
+                'vix': self.market_params.get('vix'),
+                'ivr': self.market_params.get('ivr'),
+                'iv30': self.market_params.get('iv30'),
+                'hv20': self.market_params.get('hv20')
+            }
+        }
+        
+        targets['volatility_metrics'] = volatility_metrics
+        
+        # 日志输出
+        print(f"\n📊 波动率指标汇总:")
+        print(f"   • Lambda Factor = {lambda_factor:.3f}")
+        print(f"   • T_scale = {t_scale:.3f} ({t_scale_details['vol_state']})")
+        print(f"   • VRP = {t_scale_details['vrp']:.2f} (IV30/HV20)")
+        
+        return targets
     
     def _calculate_em1_dollar(self, targets: Dict) -> Dict:
         """
@@ -276,7 +391,7 @@ class FieldCalculator:
         # Step 1: 计算物理锚点 (Raw_EM1$)
         
         min_iv = min(iv_7d, iv_14d)
-        # 从配置对象读取
+        # ⭐ 从配置对象读取
         em1_sqrt_factor = self.gamma_config.em1_sqrt_factor
         raw_em1 = spot_price * min_iv * em1_sqrt_factor
         
@@ -285,10 +400,10 @@ class FieldCalculator:
         vix_curr = self.market_params.get('vix', 15.0)
         ivr_curr = self.market_params.get('ivr', 50.0)
         
-        # 动态获取敏感度系数（基于 Beta 和财报日期）
+        # ⭐ 动态获取敏感度系数（基于 Beta 和财报日期）
         k_sys, k_idiosync = self.get_sensitivity_coeffs(symbol)
         
-        # 从配置对象读取基准参数
+        # ⭐ 从配置对象读取基准参数
         vix_base = self.gamma_config.lambda_vix_base
         ivr_floor = self.gamma_config.lambda_ivr_floor
         
@@ -452,7 +567,7 @@ class FieldCalculator:
             targets['gamma_metrics']['monthly_cluster_override'] = False
             return targets
         
-        # 从配置对象读取
+        # ⭐ 从配置对象读取
         ratio_threshold = self.gamma_config.monthly_cluster_strength_ratio
         override = (m_cluster_strength_gex / w_cluster_strength_gex >= ratio_threshold)
         
@@ -580,7 +695,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         # 提取事件数据（用于动态敏感度系数计算）
         event_data = env_vars.get('event_data', {})
         
-        # 传入 config 实例和事件数据
+        # ⭐ 传入 config 实例和事件数据
         calculator = FieldCalculator(
             config, 
             market_params=market_params,

@@ -52,6 +52,7 @@ class StrategyCalculator:
     def __init__(self, env_vars: Dict[str, Any]):
         """初始化环境变量（添加默认值保护）"""
         self.env = self._parse_env_vars(env_vars)
+        self.market_params = env_vars.get('market_params', {})
     
     def _parse_env_vars(self, env_vars: Dict[str, Any]) -> Dict[str, float]:
         """解析环境变量并设置默认值（修复版）"""
@@ -206,36 +207,132 @@ class StrategyCalculator:
     
     # ============= 2. DTE 计算 =============
     
-    def calculate_dte(self, gap_distance_em1: float, monthly_override: bool) -> Dict:
-        """动态 DTE 计算"""
+    def calculate_t_scale(self, cached_t_scale: float = None) -> float:
+        """
+        获取波动率时间缩放系数 T_scale
+        
+        优先使用上游缓存的值，否则重新计算
+        
+        Args:
+            cached_t_scale: 从 agent3_output 缓存的 t_scale
+            
+        Returns:
+            t_scale: 时间缩放系数，典型范围 0.7 ~ 1.5
+        """
+        # 优先使用缓存值
+        if cached_t_scale is not None:
+            return cached_t_scale
+        
+        # 回退：从 market_params 计算
+        hv20 = self.market_params.get('hv20', 30.0)
+        iv30 = self.market_params.get('iv30', 30.0)
+        
+        # 防止除零
+        if iv30 <= 0:
+            iv30 = 30.0
+        if hv20 <= 0:
+            hv20 = 30.0
+        
+        # T_scale = (HV20 / IV30)^0.8
+        t_scale = (hv20 / iv30) ** 0.8
+        
+        # 钳制到合理范围 [0.5, 2.0]
+        t_scale = max(0.5, min(2.0, t_scale))
+        
+        return round(t_scale, 3)
+    
+    def calculate_dte(self, gap_distance_em1: float, monthly_override: bool, 
+                      volatility_metrics: Dict = None) -> Dict:
+        """
+        基于波动率时间膨胀 (T_scale) 的动态 DTE 计算
+        
+        核心逻辑：
+        - 基准周期 21 天（一个期权月）
+        - T_scale < 1 (高IV溢价) -> DTE 缩短（市场预期波动大，快进快出）
+        - T_scale > 1 (低IV溢价) -> DTE 延长（市场平静，可以等待）
+        
+        Args:
+            gap_distance_em1: 空间距离 (EM1$ 倍数)
+            monthly_override: 是否月度结构主导
+            volatility_metrics: 从 agent3_output 缓存的波动率指标
+        """
         # ✅ 修复：添加 None 值检查
         if gap_distance_em1 is None:
             gap_distance_em1 = 2.0
             print("⚠️ [CODE3] gap_distance_em1 为 None，使用默认值 2.0")
         
-        if gap_distance_em1 > self.env['DTE_GAP_HIGH_THRESHOLD']:
-            base_dte = 14
-            gap_level = "high"
-        elif gap_distance_em1 >= self.env['DTE_GAP_MID_THRESHOLD']:
-            base_dte = 10
-            gap_level = "mid"
-        else:
-            base_dte = 7
-            gap_level = "low"
+        # 1. 获取 T_scale（优先使用缓存）
+        volatility_metrics = volatility_metrics or {}
+        cached_t_scale = volatility_metrics.get('t_scale')
+        t_scale = self.calculate_t_scale(cached_t_scale)
         
-        if monthly_override:
-            adjustment = int(self.env['DTE_MONTHLY_ADJUSTMENT'])
-            final_dte = base_dte + adjustment
-            rationale = f"gap_distance_em1={gap_distance_em1:.2f}选择{base_dte}日DTE，月度叠加+{adjustment}日={final_dte}日"
+        # 获取 t_scale 来源
+        t_scale_source = "上游缓存" if cached_t_scale is not None else "本地计算"
+        
+        # 2. 设定基准周期 (Base Cycle)
+        base_cycle_days = 21.0
+        
+        # 3. 应用波动率时间膨胀
+        vol_adjusted_dte = base_cycle_days * t_scale
+        
+        # 4. 引入 Gap 距离修正 (辅助因子)
+        if gap_distance_em1 > 3.0:
+            gap_multiplier = 1.2
+            gap_note = "远距目标+20%"
+        elif gap_distance_em1 < 1.0:
+            gap_multiplier = 0.8
+            gap_note = "近距目标-20%"
         else:
-            final_dte = base_dte
-            rationale = f"gap_distance_em1={gap_distance_em1:.2f}选择{final_dte}日DTE，无月度叠加"
+            gap_multiplier = 1.0
+            gap_note = "标准距离"
+            
+        raw_dte = vol_adjusted_dte * gap_multiplier
+        
+        # 5. 月度结构强制修正
+        monthly_note = ""
+        if monthly_override:
+            if raw_dte < 25.0:
+                monthly_note = f"月度结构强制拉长 {raw_dte:.0f}→25日"
+                raw_dte = 25.0
+            else:
+                monthly_note = "月度结构已覆盖"
+        
+        # 6. 范围钳制 (Clamping)
+        final_dte = int(max(5, min(45, raw_dte)))
+        
+        # 获取波动率状态（优先从缓存）
+        t_scale_details = volatility_metrics.get('t_scale_details', {})
+        vol_state = t_scale_details.get('vol_state', 
+            "高IV溢价" if t_scale < 0.9 else ("低IV溢价" if t_scale > 1.1 else "IV/HV均衡"))
+        
+        # 获取 IV/HV（优先从缓存）
+        market_snapshot = volatility_metrics.get('market_snapshot', {})
+        iv30 = market_snapshot.get('iv30') or self.market_params.get('iv30', 30.0)
+        hv20 = market_snapshot.get('hv20') or self.market_params.get('hv20', 30.0)
+        vrp = iv30 / hv20 if hv20 > 0 else 1.0
+        
+        # 生成解释文本
+        rationale = (
+            f"T_scale={t_scale:.2f} ({vol_state}, {t_scale_source}), "
+            f"基准21日×{t_scale:.2f}={vol_adjusted_dte:.0f}日, "
+            f"Gap修正×{gap_multiplier}({gap_note})={int(raw_dte)}日。"
+            f"{monthly_note + '。' if monthly_note else ''}"
+            f"最终DTE={final_dte}日"
+        )
         
         return {
-            "base_dte": base_dte,
             "final_dte": final_dte,
-            "gap_level": gap_level,
+            "base_dte": int(base_cycle_days),
+            "t_scale": t_scale,
+            "t_scale_source": t_scale_source,
+            "vol_adjusted_dte": round(vol_adjusted_dte, 1),
+            "gap_multiplier": gap_multiplier,
+            "gap_level": "high" if gap_distance_em1 > 3 else ("low" if gap_distance_em1 < 1 else "mid"),
             "monthly_override": monthly_override,
+            "iv30": iv30,
+            "hv20": hv20,
+            "vrp": round(vrp, 2),
+            "vol_state": vol_state,
             "rationale": rationale
         }
     
@@ -529,6 +626,9 @@ class StrategyCalculator:
         gamma_metrics = agent3_data.get("gamma_metrics", {})
         directional_metrics = agent3_data.get("directional_metrics", {})
         
+        # 🆕 获取上游缓存的波动率指标
+        volatility_metrics = agent3_data.get("volatility_metrics", {})
+        
         # 校验必需字段
         if spot == 0 or em1 == 0:
             raise ValueError("Agent 3 数据缺失关键字段：spot_price 或 em1_dollar")
@@ -540,11 +640,13 @@ class StrategyCalculator:
         strikes = self.calculate_strikes(spot, em1, walls)
         dte_info = self.calculate_dte(
             gamma_metrics.get("gap_distance_em1_multiple", 2.0),
-            gamma_metrics.get("monthly_cluster_override", False)
+            gamma_metrics.get("monthly_cluster_override", False),
+            volatility_metrics  # 🆕 传入上游缓存的波动率指标
         )
         
-        # 估算 IVR（简化处理，实际应从市场数据获取）
-        ivr_estimate = 40  # 默认中等 IVR
+        # 🆕 从上游缓存获取 IVR（不再硬编码）
+        market_snapshot = volatility_metrics.get('market_snapshot', {})
+        ivr_estimate = market_snapshot.get('ivr') or self.market_params.get('ivr', 40)
         
         # RR 计算（使用实际宽度）
         rr_credit_ic = self.calculate_rr_credit(
@@ -588,12 +690,24 @@ class StrategyCalculator:
             # 行权价（保留结构，供 Agent 6 选择）
             "strikes": strikes,
             
-            # DTE（扁平化）
+            # DTE（扁平化）+ 波动率时间膨胀
             "dte_final": dte_info["final_dte"],
             "dte_rationale": dte_info["rationale"],
             "dte_base": dte_info["base_dte"],
             "dte_gap_level": dte_info["gap_level"],
             "dte_monthly_override": dte_info["monthly_override"],
+            "dte_t_scale": dte_info["t_scale"],
+            "dte_t_scale_source": dte_info["t_scale_source"],
+            "dte_vol_state": dte_info["vol_state"],
+            
+            # 🆕 波动率指标透传（供下游使用）
+            "volatility_metrics": {
+                "lambda_factor": volatility_metrics.get("lambda_factor", 1.0),
+                "t_scale": dte_info["t_scale"],
+                "vrp": dte_info["vrp"],
+                "vol_state": dte_info["vol_state"],
+                "ivr": ivr_estimate
+            },
             
             # RR - Iron Condor（扁平化）
             "rr_ic_credit": rr_credit_ic["credit"],
