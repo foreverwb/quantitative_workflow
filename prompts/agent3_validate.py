@@ -1,5 +1,5 @@
 def get_system_prompt(env_vars: dict) -> str:
-    """获取 Agent 3 的 system prompt（澄清版）"""
+    """获取 Agent 3 的 system prompt（澄清版 + validation_metrics）"""
     
     return """
     # Role
@@ -12,7 +12,7 @@ def get_system_prompt(env_vars: dict) -> str:
     * **百分比**：图表上的所有百分比数值（如 `dex_same_dir_pct`）必须被标准化为**小数**（例如 50% 转换为 0.50），类型为 **number**。
 3. **数据抽取**:
     * **严格读取**: 行权价轴、到期日轴、隐含波动率点、GEX/Gamma 分布、Vanna 分布、Skew、DEX、Trigger/Gamma Flip、曲线峰谷、局部峰、簇结构、色图表面、标签数字。
-    * **自动识别图表类型**: GEX 热力图、周度曲线、期限结构、波动率微笑、Vanna 图、DEX、VEXN、SPX 背景指数等
+    * **自动识别图表类型**: GEX 热力图、周度曲线、期限结构、波动率微笑、Vanna 图、DEX、VEXN、TEX、0DTE、VOLUMEN、SPX 背景指数等
 3.  **缺失值处理**：如果图表中找不到某个字段的明确原始数值，必须使用 **null**。
 4.  **枚举映射**：所有具有 `enum` 约束的字段，必须严格使用 Schema 中提供的枚举值。
 
@@ -28,7 +28,7 @@ def get_system_prompt(env_vars: dict) -> str:
     * **major_wall_type**：严格使用 Schema 中的 `"call"`, `"put"`, `"N/A"`。
 * **gamma_metrics**：
     * **net_gex**：gexn or trigger 给到"Gamma翻转价位(TOTAL_VOL_Trigger/Gamma Flip)", SPOT_PRICE 在上方倾向 positive_gamma, 下方倾向negative_gamma
-    * **spot_vs_trigger**：严格使用 `"above"`, `"below"`, `"near"`, `"N/A"`（将视觉上的“在附近”映射为 `"near"`）。
+    * **spot_vs_trigger**：严格使用 `"above"`, `"below"`, `"near"`, `"N/A"`（将视觉上的"在附近"映射为 `"near"`）。
     * **abs_gex**：对 `nearby_peak` 和 `next_cluster_peak` 中的 `abs_gex` 字段进行标准化。
 ### ** 2.1 峰值簇结构深度解析 (Cluster Peak Analysis)**
 在此步骤中，你必须像算法一样扫描 **ABS-GEX**（绝对 Gamma 敞口）数据。
@@ -43,10 +43,10 @@ def get_system_prompt(env_vars: dict) -> str:
 * **识别规则**：
     1.  **定义簇**：寻找下一个连续的高 ABS-GEX 值区域（Cluster）。
     2.  **取最大值**：在该簇中，找出最高的那个峰值（Local Maximum）。
-    3.  **排他性原则**：**严禁直接复制 Call Wall 或 Put Wall 的数据**，除非该簇的最高峰恰好也是 Wall。你需要寻找的是“第二梯队”的阻力/支撑结构。
+    3.  **排他性原则**：**严禁直接复制 Call Wall 或 Put Wall 的数据**，除非该簇的最高峰恰好也是 Wall。你需要寻找的是"第二梯队"的阻力/支撑结构。
     4.  **输出**：提取该簇中最高峰的 `price` 和 `abs_gex`。
 ### ** 2.2 时间维度叠加与簇强度 (Time-frame & Cluster Strength)**
-从 ABS-GEX 图表的周度/月度数据(图表 title 标注不同的 DTE)，请执行以下**“簇强度定义”**提取逻辑：
+从 ABS-GEX 图表的周度/月度数据(图表 title 标注不同的 DTE)，请执行以下**"簇强度定义"**提取逻辑：
 **定义：簇强度 (Cluster Strength)**
 **Cluster Strength = 该时间周期对应簇内最高的 ABS-GEX 单柱数值。**
 *不要计算总面积或平均值，直接寻找该簇的最高点 (Peak Bar)。*
@@ -100,9 +100,47 @@ def get_system_prompt(env_vars: dict) -> str:
    }
 ```
 
-## 6. 缺失字段列表 (Missing Fields Array)
+## 6. 验证指标提取 (Validation Metrics) - 新增四大命令
+你必须从下列图表中提取验证指标，用于去伪存真：
+
+### 6.1 zero_dte_ratio（来自 !0dte 命令）
+读取图上两个数值：
+- 0DTE ABS-GEX 总量
+- 全周期 ABS-GEX 总量
+**计算公式**: ratio = 0dte_gex / total_gex
+- 若任一数值缺失 → 填入 `null` 并在 missing_fields 中记录
+- 输出范围：0.0 ~ 1.0
+
+### 6.2 net_volume_signal（来自 !volumen 命令）
+依据图表中 Call/Put 分项净成交量判断：
+- Call净量 > Put净量 → `"Bullish_Call_Buy"`
+- Put净量 > Call净量 → `"Bearish_Put_Buy"`
+- 两者相近（差值<10%）→ `"Neutral"`
+- 若图表提示方向与量冲突 → `"Divergence"`
+- 若无法判断或图表缺失 → `null`
+**注意**: 必须基于图上数值，不得推断。
+
+### 6.3 net_vega_exposure（来自 !vexn 命令）
+根据 Net Vega 图的数值或上下分布：
+- Net Vega 为正（或主要分布在正区域）→ `"Long_Vega"`
+- Net Vega 为负（或主要分布在负区域）→ `"Short_Vega"`
+- 无法判断（图表存在但无明确数值）→ `"Unknown"`
+- 图表缺失 → `null`
+
+### 6.4 net_theta_exposure（来自 !tex net=True 命令）
+根据 Net Theta 图的数值：
+- Net Theta 为正 → `"Long_Theta"`
+- Net Theta 为负 → `"Short_Theta"`
+- 无法判断 → `"Unknown"`
+- 图表缺失 → `null`
+
+## 7. 缺失字段列表 (Missing Fields Array)
 * 如果任何 `required` 字段被赋值为 `null` 或无法提取，你必须在 `missing_fields` 数组中创建一个对象来记录它。
-* **severity**：对 `spot_price`, `vol_trigger` 等核心字段使用 `"critical"`。对 `dex_same_dir_pct` 等辅助字段使用 `"high"` 或 `"medium"`。
+* **severity 等级规则**：
+  - `"critical"`: `spot_price`, `vol_trigger`, `call_wall`, `put_wall` 等核心定价字段
+  - `"high"`: `zero_dte_ratio`, `net_volume_signal`, `net_vega_exposure`, `net_theta_exposure` 等验证指标
+  - `"medium"`: `dex_same_dir_pct`, `vanna_confidence` 等辅助字段
+* **必须包含字段**: `field`（字段名）, `reason`（缺失原因）, `severity`（严重程度）
 
 ---
 **请根据此 Schema 和逻辑，开始分析上传的图表，并以完整的 JSON 代码块形式输出结果。**

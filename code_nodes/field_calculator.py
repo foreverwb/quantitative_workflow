@@ -203,7 +203,7 @@ class FieldCalculator:
         return k_sys, k_idiosync
     
     def validate_raw_fields(self, data: Dict) -> Dict:
-        """验证原始字段完整性（23个）"""
+        """验证原始字段完整性（27个，含 validation_metrics 4个）"""
         targets = data.get('targets', {})
         
         if isinstance(targets, str):
@@ -260,15 +260,35 @@ class FieldCalculator:
             if not self._is_valid_value(atm_iv.get(field)):
                 missing_fields.append({"field": field, "path": f"atm_iv.{field}"})
         
-        total_required = 23
-        provided = total_required - len(missing_fields)
+        # 6. validation_metrics (4个) - 允许 null，但需要记录
+        validation_metrics = targets.get('validation_metrics', {})
+        validation_fields = ["zero_dte_ratio", "net_volume_signal", "net_vega_exposure", "net_theta_exposure"]
+        validation_missing = []
+        for field in validation_fields:
+            value = validation_metrics.get(field)
+            # validation_metrics 允许 null，但如果整个对象不存在则记录
+            if validation_metrics and value is None:
+                validation_missing.append({"field": field, "path": f"validation_metrics.{field}", "severity": "high"})
+        
+        # 核心字段总数（不含 validation_metrics）
+        core_required = 23
+        core_provided = core_required - len(missing_fields)
+        
+        # 含 validation_metrics 的总数
+        total_required = 27
+        total_missing = len(missing_fields) + len(validation_missing)
+        total_provided = total_required - total_missing
         
         return {
-            "is_complete": len(missing_fields) == 0,
+            "is_complete": len(missing_fields) == 0,  # 核心字段完整即可
             "missing_fields": missing_fields,
+            "validation_missing": validation_missing,  # 单独记录验证字段缺失
             "total_required": total_required,
-            "provided": provided,
-            "completion_rate": int((provided / total_required) * 100)
+            "core_required": core_required,
+            "provided": total_provided,
+            "core_provided": core_provided,
+            "completion_rate": int((core_provided / core_required) * 100),
+            "validation_rate": int(((4 - len(validation_missing)) / 4) * 100) if validation_metrics else 0
         }
     
     def calculate_all(self, data: Dict) -> Dict:
@@ -295,7 +315,7 @@ class FieldCalculator:
         # 计算指数 EM1$
         targets = self._calculate_indices_em1(targets)
         
-        # 🆕 计算 T_scale 并聚合波动率指标
+        # 计算 T_scale 并聚合波动率指标
         targets = self._aggregate_volatility_metrics(targets)
         
         # 验证计算结果

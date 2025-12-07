@@ -15,29 +15,38 @@ def check_data_completeness(target: dict) -> dict:
     检查原始数据完整性（与 JSON Schema 保持一致）
     
     检查字段：
-    1. targets.symbol
-    2. targets.spot_price
+    1. targets.symbol (1个)
+    2. targets.spot_price (1个)
     3. targets.walls (4个字段)
     4. targets.gamma_metrics (11个字段)
     5. targets.directional_metrics (5个字段)
     6. targets.atm_iv (3个字段)
+    7. targets.validation_metrics (4个字段) - 允许 null，单独统计
     
-    总计：23个原始字段（不包括计算字段）
+    核心字段：23个（1-6）
+    验证字段：4个（7）
+    总计：27个原始字段（不包括计算字段）
     
     Args:
         target: targets 字典
         
     Returns:
         {
-            "is_complete": bool,
-            "missing_fields": [],
-            "total_required": 23,
-            "provided": int
+            "is_complete": bool,          # 核心字段是否完整
+            "missing_fields": [],         # 核心字段缺失列表
+            "validation_missing": [],     # 验证字段缺失列表
+            "core_required": 23,
+            "total_required": 27,
+            "core_provided": int,
+            "provided": int,
+            "completion_rate": int,       # 核心字段完成率
+            "validation_rate": int        # 验证字段完成率
         }
     """
     missing_fields = []
+    validation_missing = []
     
-    # 1. 顶层字段
+    # 1. 顶层字段 (2个)
     if not is_valid_value(target.get("symbol")):
         missing_fields.append("symbol")
     if not is_valid_value(target.get("spot_price")):
@@ -56,7 +65,7 @@ def check_data_completeness(target: dict) -> dict:
         if not is_valid_value(gamma.get(field)):
             missing_fields.append(f"gamma_metrics.{field}")
     
-    # 检查 nearby_peak
+    # 检查 nearby_peak (2个)
     nearby_peak = gamma.get("nearby_peak", {})
     if not isinstance(nearby_peak, dict):
         missing_fields.append("gamma_metrics.nearby_peak")
@@ -65,7 +74,7 @@ def check_data_completeness(target: dict) -> dict:
             if not is_valid_value(nearby_peak.get(field)):
                 missing_fields.append(f"gamma_metrics.nearby_peak.{field}")
     
-    # 检查 next_cluster_peak
+    # 检查 next_cluster_peak (2个)
     next_cluster = gamma.get("next_cluster_peak", {})
     if not isinstance(next_cluster, dict):
         missing_fields.append("gamma_metrics.next_cluster_peak")
@@ -82,7 +91,7 @@ def check_data_completeness(target: dict) -> dict:
             # monthly_data 存在且结构正确，算作有效
             pass
     
-    # 检查 weekl_data（可选，但如果存在需要验证结构）
+    # 检查 weekly_data（可选，但如果存在需要验证结构）
     weekly_data = gamma.get("weekly_data", {})
     if weekly_data and isinstance(weekly_data, dict):
         weekly_cluster_strength = weekly_data.get("cluster_strength", {})
@@ -103,15 +112,51 @@ def check_data_completeness(target: dict) -> dict:
         if not is_valid_value(atm_iv.get(field)):
             missing_fields.append(f"atm_iv.{field}")
     
-    total_required = 23  # 23个原始字段
-    provided = total_required - len(missing_fields)
+    # 6. validation_metrics (4个字段) - 允许 null，单独统计
+    validation_metrics = target.get("validation_metrics", {})
+    validation_fields = ["zero_dte_ratio", "net_volume_signal", "net_vega_exposure", "net_theta_exposure"]
+    
+    if not validation_metrics or not isinstance(validation_metrics, dict):
+        # validation_metrics 整体缺失
+        for field in validation_fields:
+            validation_missing.append({
+                "field": field, 
+                "path": f"validation_metrics.{field}", 
+                "severity": "high",
+                "reason": "validation_metrics 对象缺失"
+            })
+    else:
+        # 检查每个字段（允许 null 值，但如果 key 不存在则记录）
+        for field in validation_fields:
+            if field not in validation_metrics:
+                validation_missing.append({
+                    "field": field, 
+                    "path": f"validation_metrics.{field}", 
+                    "severity": "high",
+                    "reason": "字段缺失"
+                })
+    
+    # 核心字段统计 (23个)
+    core_required = 23
+    core_provided = core_required - len(missing_fields)
+    
+    # 验证字段统计 (4个)
+    validation_provided = 4 - len(validation_missing)
+    
+    # 总字段统计 (27个)
+    total_required = 27
+    total_provided = core_provided + validation_provided
     
     return {
-        "is_complete": len(missing_fields) == 0,
+        "is_complete": len(missing_fields) == 0,  # 核心字段完整即可
         "missing_fields": missing_fields,
+        "validation_missing": validation_missing,
+        "core_required": core_required,
         "total_required": total_required,
-        "provided": provided,
-        "completion_rate": int((provided / total_required) * 100)
+        "core_provided": core_provided,
+        "provided": total_provided,
+        "completion_rate": int((core_provided / core_required) * 100),
+        "validation_rate": int((validation_provided / 4) * 100)
     }
 
 
@@ -149,8 +194,9 @@ def smart_merge(first_data: dict, new_data: dict) -> Tuple[dict, dict]:
     new_fields_count = 0
     updated_fields_count = 0
     
-    # 合并各个 section
-    for section in ["gamma_metrics", "directional_metrics", "atm_iv", "walls"]:
+    # 合并各个 section（包含 validation_metrics）
+    sections = ["gamma_metrics", "directional_metrics", "atm_iv", "walls", "validation_metrics"]
+    for section in sections:
         if section not in first_targets:
             first_targets[section] = {}
         
@@ -158,7 +204,15 @@ def smart_merge(first_data: dict, new_data: dict) -> Tuple[dict, dict]:
             for key, new_value in new_targets[section].items():
                 old_value = first_targets[section].get(key)
                 
-                if is_valid_value(new_value):
+                # validation_metrics 允许 null 值，只要 key 存在即视为有效
+                if section == "validation_metrics":
+                    if key not in first_targets[section]:
+                        first_targets[section][key] = new_value
+                        new_fields_count += 1
+                    elif old_value != new_value and new_value is not None:
+                        first_targets[section][key] = new_value
+                        updated_fields_count += 1
+                elif is_valid_value(new_value):
                     if not is_valid_value(old_value):
                         first_targets[section][key] = new_value
                         new_fields_count += 1
@@ -234,18 +288,23 @@ def is_valid_value(value: Any) -> bool:
 
 
 def count_valid_fields_in_dict(target_dict: dict) -> int:
-    """统计字典中的有效字段数量"""
+    """统计字典中的有效字段数量（含 validation_metrics）"""
     count = 0
     
-    # 标准嵌套结构
+    # 标准嵌套结构（核心字段）
     for section in ["gamma_metrics", "directional_metrics", "atm_iv", "walls"]:
         if section in target_dict and isinstance(target_dict[section], dict):
             for value in target_dict[section].values():
                 if is_valid_value(value):
                     count += 1
     
+    # validation_metrics（允许 null 值，只要 key 存在即计数）
+    validation_metrics = target_dict.get("validation_metrics", {})
+    if isinstance(validation_metrics, dict):
+        count += len(validation_metrics)  # 有 key 就计数
+    
     # 检查顶层字段
-    for key in ["spot_price"]:
+    for key in ["spot_price", "symbol"]:
         if is_valid_value(target_dict.get(key)):
             count += 1
     
@@ -343,16 +402,30 @@ def main(
         target = get_target_dict(merged_data)
         completeness = check_data_completeness(target)
         
+        # 核心字段状态
         if not completeness["is_complete"]:
             missing_count = len(completeness["missing_fields"])
-            print(f"⚠️ 数据不完整，缺失 {missing_count} 个字段:")
+            print(f"⚠️ 核心数据不完整，缺失 {missing_count} 个字段:")
             for field in completeness["missing_fields"][:5]:  # 只显示前5个
                 print(f"   - {field}")
             if missing_count > 5:
                 print(f"   ... 还有 {missing_count - 5} 个字段")
-            print(f"   完成度: {completeness['completion_rate']}% ({completeness['provided']}/{completeness['total_required']})")
+            print(f"   核心完成度: {completeness['completion_rate']}% ({completeness['core_provided']}/{completeness['core_required']})")
         else:
-            print(f"✅ 原始数据完整 ({completeness['provided']}/{completeness['total_required']} 字段)")
+            print(f"✅ 核心数据完整 ({completeness['core_provided']}/{completeness['core_required']} 字段)")
+        
+        # 验证字段状态
+        validation_missing = completeness.get("validation_missing", [])
+        if validation_missing:
+            print(f"⚠️ 验证字段缺失 {len(validation_missing)} 个:")
+            for item in validation_missing[:4]:
+                print(f"   - {item['path']} ({item.get('severity', 'high')})")
+            print(f"   验证完成度: {completeness['validation_rate']}%")
+        else:
+            print(f"✅ 验证字段完整 (4/4)")
+        
+        # 总体完成度
+        print(f"📊 总体完成度: {completeness['provided']}/{completeness['total_required']} 字段")
         
         # 保存缓存
         with open(cache_file, 'w', encoding='utf-8') as f:

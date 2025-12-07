@@ -32,7 +32,8 @@ def get_schema() -> dict:
                     "walls",
                     "gamma_metrics",
                     "directional_metrics",
-                    "atm_iv"
+                    "atm_iv",
+                    "validation_metrics"
                 ],
                 "properties": {
                     "symbol": {
@@ -247,6 +248,42 @@ def get_schema() -> dict:
                                 "type": "string",
                                 "enum": ["7d", "14d", "21d_fallback", "N/A"],
                                 "description": "IV 数据来源"
+                            }
+                        },
+                        "additionalProperties": False
+                    },
+                    
+                    # ------------------------
+                    # 2.5 验证指标（新增）
+                    # ------------------------
+                    "validation_metrics": {
+                        "type": "object",
+                        "description": "验证型数据，用于去伪存真",
+                        "required": [
+                            "zero_dte_ratio",
+                            "net_volume_signal",
+                            "net_vega_exposure",
+                            "net_theta_exposure"
+                        ],
+                        "properties": {
+                            "zero_dte_ratio": {
+                                "type": ["number", "null"],
+                                "description": "0DTE GEX 占总 GEX 的比例 (0-1)，来自 !0dte 命令"
+                            },
+                            "net_volume_signal": {
+                                "type": ["string", "null"],
+                                "enum": ["Bullish_Call_Buy", "Bearish_Put_Buy", "Neutral", "Divergence", None],
+                                "description": "净成交量方向，来自 !volumen 命令"
+                            },
+                            "net_vega_exposure": {
+                                "type": ["string", "null"],
+                                "enum": ["Long_Vega", "Short_Vega", "Unknown", None],
+                                "description": "Dealer Vega 敞口，来自 !vexn 命令"
+                            },
+                            "net_theta_exposure": {
+                                "type": ["string", "null"],
+                                "enum": ["Long_Theta", "Short_Theta", "Unknown", None],
+                                "description": "Dealer Theta 敞口，来自 !tex net=True 命令"
                             }
                         },
                         "additionalProperties": False

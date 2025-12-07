@@ -284,7 +284,7 @@ class AnalysisPipeline:
         """步骤6：策略对比"""
         strategies_result = context["strategies_result"]
         scenario_result = context["scenario_result"]
-        calculated_data = context["calculated_data"]
+        strategy_calc_data = context["strategy_calc_data"]  # ✅ 使用 code3 输出，包含 validation
         
         result = self.agent_executor.execute_code_node(
             node_name="策略对比",
@@ -292,7 +292,7 @@ class AnalysisPipeline:
             description="计算策略 EV、RAR、流动性、场景匹配度",
             strategies_output=strategies_result,
             scenario_output=scenario_result,
-            agent3_output=calculated_data,
+            agent3_output=strategy_calc_data,  # ✅ 传递 code3 输出
             **self.env_vars
         )
         
@@ -395,13 +395,39 @@ class AnalysisPipeline:
         return context
     
     @staticmethod
+    @staticmethod
     def _safe_parse_json(data: Any) -> Dict:
-        """安全解析 JSON"""
+        """
+        安全解析数据为 dict
+        
+        支持格式:
+        1. dict -> 直接返回
+        2. {"result": dict} -> 返回内层 dict (向后兼容)
+        3. {"result": "json"} -> 解析并返回 (向后兼容)
+        4. "json" -> 解析为 dict
+        """
+        # 已经是 dict
         if isinstance(data, dict):
+            # 兼容旧格式: {"result": ...}
+            if "result" in data and len(data) == 1:
+                inner = data["result"]
+                if isinstance(inner, dict):
+                    return inner
+                elif isinstance(inner, str):
+                    try:
+                        return json.loads(inner)
+                    except:
+                        return {"raw": inner}
             return data
-        elif isinstance(data, str):
+        
+        # JSON 字符串
+        if isinstance(data, str):
             try:
-                return json.loads(data)
+                parsed = json.loads(data)
+                if isinstance(parsed, dict):
+                    return parsed
             except:
-                return {}
+                pass
+            return {"raw": data}
+        
         return {}
