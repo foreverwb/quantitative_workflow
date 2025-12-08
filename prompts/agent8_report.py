@@ -89,6 +89,30 @@ def get_system_prompt() -> str:
 
 def get_user_prompt(agent3: dict, agent5: dict, agent7: dict, event: dict) -> str:
     """用户提示词"""
+    import json
+    
+    # 辅助函数：清理 markdown 并解析 JSON
+    def _clean_and_parse(data):
+        if isinstance(data, str):
+            clean_text = data.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            elif clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+            try:
+                return json.loads(clean_text.strip())
+            except json.JSONDecodeError:
+                return {}
+        return data if isinstance(data, dict) else {}
+    
+    # 防御性检查：确保输入是字典
+    agent3 = _clean_and_parse(agent3)
+    agent5 = _clean_and_parse(agent5)
+    agent7 = _clean_and_parse(agent7)
+    event = _clean_and_parse(event)
+    
     symbol = agent3.get("symbol", "UNKNOWN")
     current_price = agent3.get("market_data", {}).get("current_price", 0)
     ta_score = agent3.get("technical_analysis", {}).get("ta_score", 0)

@@ -108,12 +108,12 @@ class FullAnalysisMode(BaseMode):
                 )
     
         except WorkflowError as we:
-            # ⭐ 捕获分类后的错误
+            # 捕获分类后的错误
             logger.error(f"❌ 流程终止: {we.message}")
             return error_handler.handle_error(we)
         
         except Exception as e:
-            # ⭐ 未分类的错误（兜底）
+            # 未分类的错误（兜底）
             logger.exception("❌ 未知错误")
             workflow_error = WorkflowError(
                 message=f"未预期的错误: {str(e)}",
@@ -185,6 +185,8 @@ class FullAnalysisMode(BaseMode):
             inputs=inputs,
             json_schema=schemas.agent3_schema.get_schema()
         )
+        print("---------------> Agent3 <-------------------", json.dumps(response))
+        
         # 解析响应
         raw_content = response.get("content", {})
         

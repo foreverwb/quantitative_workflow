@@ -97,13 +97,13 @@ v_path: {symbol} 7D ATM-IV 对比 3 日 skew 数据
 
 def get_user_prompt(symbol: str, market_params: dict = None) -> str:
     """
-    获取用户提示词（⭐ 修复：使用真实市场参数）
+    获取用户提示词（修复：使用真实市场参数）
     
     Args:
         symbol: 股票代码
         market_params: 真实的市场参数 (vix, ivr, iv30, hv20)
     """
-    # ⭐ 关键修复：使用用户实际输入的参数
+    # 关键修复：使用用户实际输入的参数
     if market_params:
         vix = market_params.get('vix', 18.5)
         ivr = market_params.get('ivr', 50)

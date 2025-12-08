@@ -191,7 +191,7 @@ class AgentExecutor:
                 "error_message": str(e),
                 "error_type": type(e).__name__
             }
-            # ⭐ 新增：错误分类
+            # 新增：错误分类
             workflow_error = classify_code_error(node_name, e, kwargs)
             
             if self.enable_pretty_print:
@@ -199,5 +199,5 @@ class AgentExecutor:
             
             logger.error(f"❌ [{node_name}] 执行失败: {str(e)}")
             
-            # ⭐ 抛出分类后的错误
+            # 抛出分类后的错误
             raise workflow_error from e

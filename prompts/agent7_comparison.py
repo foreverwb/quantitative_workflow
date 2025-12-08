@@ -66,6 +66,27 @@ def get_system_prompt() -> str:
 def get_user_prompt(comparison_data: dict, scenario: dict, strategies: dict) -> str:  # ✅ 改为字典
     """用户提示词"""
     
+    # 辅助函数：清理 markdown 并解析 JSON
+    def _clean_and_parse(data):
+        if isinstance(data, str):
+            clean_text = data.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            elif clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+            try:
+                return json.loads(clean_text.strip())
+            except json.JSONDecodeError:
+                return {}
+        return data if isinstance(data, dict) else {}
+    
+    # 防御性检查：确保输入是字典
+    comparison_data = _clean_and_parse(comparison_data)
+    scenario = _clean_and_parse(scenario)
+    strategies = _clean_and_parse(strategies)
+    
     # 提取 quality_filter（来自 Code 4 输出）
     quality_filter = comparison_data.get("quality_filter", {})
     zero_dte_ratio = quality_filter.get("zero_dte_ratio", 0)

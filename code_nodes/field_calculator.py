@@ -30,7 +30,7 @@ class FieldCalculator:
             market_params: 市场参数 (vix, ivr, iv30, hv20, beta, earning_date)
             event_data: 事件检测数据（包含 days_to_earnings）
         """
-        # ⭐ 一次性获取所有配置
+        # 一次性获取所有配置
         self.gamma_config = config_loader.get_section('gamma')
         self.beta_config = config_loader.get_section('beta')
         self.market_params = market_params or {}
@@ -411,7 +411,7 @@ class FieldCalculator:
         # Step 1: 计算物理锚点 (Raw_EM1$)
         
         min_iv = min(iv_7d, iv_14d)
-        # ⭐ 从配置对象读取
+        # 从配置对象读取
         em1_sqrt_factor = self.gamma_config.em1_sqrt_factor
         raw_em1 = spot_price * min_iv * em1_sqrt_factor
         
@@ -420,10 +420,10 @@ class FieldCalculator:
         vix_curr = self.market_params.get('vix', 15.0)
         ivr_curr = self.market_params.get('ivr', 50.0)
         
-        # ⭐ 动态获取敏感度系数（基于 Beta 和财报日期）
+        # 动态获取敏感度系数（基于 Beta 和财报日期）
         k_sys, k_idiosync = self.get_sensitivity_coeffs(symbol)
         
-        # ⭐ 从配置对象读取基准参数
+        # 从配置对象读取基准参数
         vix_base = self.gamma_config.lambda_vix_base
         ivr_floor = self.gamma_config.lambda_ivr_floor
         
@@ -587,7 +587,7 @@ class FieldCalculator:
             targets['gamma_metrics']['monthly_cluster_override'] = False
             return targets
         
-        # ⭐ 从配置对象读取
+        # 从配置对象读取
         ratio_threshold = self.gamma_config.monthly_cluster_strength_ratio
         override = (m_cluster_strength_gex / w_cluster_strength_gex >= ratio_threshold)
         
@@ -715,7 +715,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         # 提取事件数据（用于动态敏感度系数计算）
         event_data = env_vars.get('event_data', {})
         
-        # ⭐ 传入 config 实例和事件数据
+        # 传入 config 实例和事件数据
         calculator = FieldCalculator(
             config, 
             market_params=market_params,
@@ -723,7 +723,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         )
         
         # 验证原始字段
-        validation = calculator.validate_raw_fields(data.get('result'))
+        validation = calculator.validate_raw_fields(data)
         
         print(f"\n📊 验证结果:")
         print(f"  • 完成率: {validation['completion_rate']}%")
@@ -737,7 +737,8 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
                 "status": "incomplete",
                 "data_status": "awaiting_data",
                 "validation": validation,
-                "targets": data.get("targets")
+                "targets": data.get("targets"),
+                "symbol": symbol  # 修复：添加 symbol 字段
             }
             return result
         
@@ -754,6 +755,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
             "status": "complete",
             "data_status": "ready",
             "validation": validation,
+            "symbol": symbol,  # 修复：添加 symbol 字段
             **calculated_data
         }
         return result
@@ -763,6 +765,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         print(f"\n❌ Calculator 执行异常:")
         print(traceback.format_exc())
         return {
+            "symbol": symbol,  # 修复：添加 symbol 字段
             "result": json.dumps({
                 "error": True,
                 "error_message": str(e),

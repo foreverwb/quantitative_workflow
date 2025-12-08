@@ -60,7 +60,7 @@ def validate_cache_file(cache_file: str, symbol: str) -> tuple[bool, str, dict]:
     Returns:
         (is_valid, error_message, cache_info)
     """
-    # ⭐ 修复：提取文件名（兼容路径输入）
+    # 修复：提取文件名（兼容路径输入）
     cache_path = Path(cache_file)
     filename = cache_path.name
     
@@ -113,7 +113,7 @@ def validate_cache_file(cache_file: str, symbol: str) -> tuple[bool, str, dict]:
         "symbol": file_symbol,
         "date": file_date,
         "parsed_date": parsed_date,
-        "cache_path": final_cache_path,  # ⭐ 返回实际路径
+        "cache_path": final_cache_path,  # 返回实际路径
         "start_date": start_date,
         "has_source_target": cache_data.get("source_target") is not None,
         "snapshot_count": sum(1 for k in cache_data.keys() if k.startswith("snapshots_"))

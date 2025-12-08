@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 from typing import Dict, Any
 from loguru import logger
 
@@ -13,7 +14,8 @@ from code_nodes import (
     event_detection_main,
     scoring_main,
     strategy_calc_main,
-    comparison_main
+    comparison_main,
+    html_report_main
 )
 from utils.console_printer import (
     print_header,
@@ -94,6 +96,7 @@ class AnalysisPipeline:
             ("策略对比", self._step_comparison, "计算策略 EV、RAR、流动性"),
             ("策略排序", self._step_ranking, "综合评分并排序推荐"),
             ("生成报告", self._step_report, "生成人类可读的分析报告"),
+            ("生成HTML", self._step_html_report, "生成可在浏览器查看的HTML报告"),
             ("保存结果", self._step_save_results, "保存分析结果到缓存")
         ]
         
@@ -105,13 +108,13 @@ class AnalysisPipeline:
             logger.info(f"📍 Step {i}/{len(steps)}: {step_name}")
             
             try:
-                # ⭐ 记录步骤开始
+                # 记录步骤开始
                 if self.error_handler:
                     self.error_handler.add_completed_step(f"Step {i}: {step_name} 开始")
                 
                 context = step_func(context)
                 
-                # ⭐ 记录步骤完成
+                # 记录步骤完成
                 if self.error_handler:
                     self.error_handler.add_completed_step(f"Step {i}: {step_name} 完成")
                 
@@ -119,7 +122,7 @@ class AnalysisPipeline:
                     print_success(f"{step_name} 完成")
             
             except WorkflowError as we:
-                # ⭐ 捕获分类后的错误，立即终止
+                # 捕获分类后的错误，立即终止
                 if self.enable_pretty_print:
                     print_error(f"{step_name} 失败", we.message)
                 
@@ -136,7 +139,7 @@ class AnalysisPipeline:
                     }
             
             except Exception as e:
-                # ⭐ 未分类错误（兜底）
+                # 未分类错误（兜底）
                 if self.enable_pretty_print:
                     print_error(f"{step_name} 失败", str(e))
                 
@@ -226,7 +229,8 @@ class AnalysisPipeline:
             description="基于评分推演 3-5 种市场场景"
         )
         
-        context["scenario_result"] = response.get("content", {})
+        # 使用 _safe_parse_json 确保 content 是字典（修复字符串类型问题）
+        context["scenario_result"] = self._safe_parse_json(response.get("content", {}))
         return context
     
     def _step_strategy_calc(self, context: Dict) -> Dict:
@@ -277,7 +281,8 @@ class AnalysisPipeline:
             description="为每个场景设计 2-3 种期权策略"
         )
         print("策略生成 response", response)
-        context["strategies_result"] = response.get("content", {})
+        # 使用 _safe_parse_json 确保 content 是字典
+        context["strategies_result"] = self._safe_parse_json(response.get("content", {}))
         return context
     
     def _step_comparison(self, context: Dict) -> Dict:
@@ -327,7 +332,8 @@ class AnalysisPipeline:
             description="综合评分并排序，推荐 Top 3 策略"
         )
         
-        context["ranking_result"] = response.get("content", {})
+        # 使用 _safe_parse_json 确保 content 是字典
+        context["ranking_result"] = self._safe_parse_json(response.get("content", {}))
         return context
     
     def _step_report(self, context: Dict) -> Dict:
@@ -360,6 +366,39 @@ class AnalysisPipeline:
         )
         
         context["final_report"] = response.get("content", "")
+        return context
+    
+    def _step_html_report(self, context: Dict) -> Dict:
+        """步骤9：生成 HTML 报告"""
+        symbol = context["symbol"]
+        final_report = context.get("final_report", "")
+        
+        # 从 cache_file 提取日期
+        start_date = None
+        if self.cache_file:
+            match = re.match(r'(\w+)_(\d{8})\.json', self.cache_file)
+            if match:
+                start_date = match.group(2)
+        
+        result = self.agent_executor.execute_code_node(
+            node_name="HTML报告生成",
+            func=html_report_main,
+            description="将 Markdown 报告转为 HTML 格式",
+            report_markdown=final_report,
+            symbol=symbol,
+            start_date=start_date,
+            output_dir="data/output",
+            **self.env_vars
+        )
+        
+        context["html_report_result"] = result
+        
+        # 打印 HTML 文件路径
+        if result.get("status") == "success":
+            html_path = result.get("html_path", "")
+            if self.enable_pretty_print:
+                print_success(f"HTML 报告已生成: {html_path}")
+        
         return context
     
     def _step_save_results(self, context: Dict) -> Dict:
@@ -395,7 +434,6 @@ class AnalysisPipeline:
         return context
     
     @staticmethod
-    @staticmethod
     def _safe_parse_json(data: Any) -> Dict:
         """
         安全解析数据为 dict
@@ -405,6 +443,7 @@ class AnalysisPipeline:
         2. {"result": dict} -> 返回内层 dict (向后兼容)
         3. {"result": "json"} -> 解析并返回 (向后兼容)
         4. "json" -> 解析为 dict
+        5. "```json...```" -> 清理 Markdown 标记后解析 (新增)
         """
         # 已经是 dict
         if isinstance(data, dict):
@@ -422,8 +461,18 @@ class AnalysisPipeline:
         
         # JSON 字符串
         if isinstance(data, str):
+            # 新增：清理 Markdown 代码块标记
+            clean_text = data.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            elif clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+            clean_text = clean_text.strip()
+            
             try:
-                parsed = json.loads(data)
+                parsed = json.loads(clean_text)
                 if isinstance(parsed, dict):
                     return parsed
             except:

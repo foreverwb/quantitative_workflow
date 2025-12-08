@@ -21,7 +21,7 @@ class StateManager:
             cache_dir: 缓存目录
         """
         self.cache_dir = cache_dir
-        # ⭐ 关键改动：仅在不存在时创建
+        # 关键改动：仅在不存在时创建
         if not self.cache_dir.exists():
             logger.debug(f"📁 创建状态缓存目录: {self.cache_dir}")
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -57,13 +57,13 @@ class StateManager:
         try:
             state["last_updated"] = datetime.now().isoformat()
             
-             # ⭐ 确保目录存在
+             # 确保目录存在
             if not self.cache_dir.exists():
                 self.cache_dir.mkdir(parents=True, exist_ok=True)
             
-            # ⭐ 确保 UTF-8 编码
+            # 确保 UTF-8 编码
             with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)  # ⭐ ensure_ascii=False
+                json.dump(state, f, ensure_ascii=False, indent=2)  # ensure_ascii=False
             
             logger.debug(f"💾 已保存 {symbol} 的状态")
         except Exception as e:

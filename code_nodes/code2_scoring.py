@@ -1,5 +1,6 @@
 import json
 from typing import Dict, Any, Tuple
+from utils.formatters import F  # 安全格式化工具
 
 
 def main(agent3_output: dict, technical_score: float = 0, **env_vars) -> dict:
@@ -268,7 +269,7 @@ class OptionsScoring:
         
         rationale = (
             f"gap_distance {gap_distance:.2f}({prob_desc})给{base_score}分，"
-            f"cluster {cluster_strength:.2f}({cluster_desc})调整{adjustment:+d}分"
+            f"cluster {cluster_strength:.2f}({cluster_desc})调整{F.int(adjustment, signed=True)}分"
         )
         
         return {
@@ -929,7 +930,7 @@ class OptionsScoring:
         full_note = f"参考{primary_symbol}背景（NET-GEX={idx_net_gex}）：" + "；".join(consistency_note)
         
         # 评分逻辑说明
-        rationale = f"基础5分，指数一致性调整{adjustment:+d}分（bonus={consistency_bonus}, penalty={conflict_penalty}）→ {final_score}分"
+        rationale = f"基础5分，指数一致性调整{F.int(adjustment, signed=True)}分（bonus={consistency_bonus}, penalty={conflict_penalty}）→ {final_score}分"
         
         return {
             "score": final_score,

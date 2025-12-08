@@ -21,13 +21,13 @@ class CacheManager:
         """初始化缓存管理器"""
         # 完整分析输出目录
         self.output_dir = Path("data/output")
-        # ⭐ 关键改动：仅在不存在时创建
+        # 关键改动：仅在不存在时创建
         if not self.output_dir.exists():
             self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # 临时缓存目录
         self.temp_dir = Path("data/temp")
-        # ⭐ 关键改动：仅在不存在时创建
+        # 关键改动：仅在不存在时创建
         if not self.temp_dir.exists():
             self.temp_dir.mkdir(parents=True, exist_ok=True)
     
@@ -51,7 +51,7 @@ class CacheManager:
         if not start_date:
             start_date = datetime.now().strftime("%Y%m%d")
         
-        # ⭐ 创建日期子目录
+        # 创建日期子目录
         symbol_dir = self.output_dir / symbol
         date_dir = symbol_dir / start_date
         if not date_dir.exists():
@@ -128,7 +128,7 @@ class CacheManager:
             market_params: 市场参数 
             dyn_params: 动态参数 
         """
-        # ⭐ 验证 symbol
+        # 验证 symbol
         if not symbol or symbol.upper() == "UNKNOWN":
             logger.error(f"无效的 symbol: '{symbol}'，跳过保存")
             return
@@ -148,7 +148,7 @@ class CacheManager:
             symbol_dir = self.output_dir / symbol
             date_dir = symbol_dir / start_date
             
-            # ⭐ 关键改动：仅在不存在时创建
+            # 关键改动：仅在不存在时创建
             if not date_dir.exists():
                 logger.debug(f"📁 创建缓存目录: {date_dir}")
                 date_dir.mkdir(parents=True, exist_ok=True)
@@ -268,7 +268,7 @@ class CacheManager:
         Returns:
             保存结果
         """
-        # ⭐ 验证 symbol
+        # 验证 symbol
         if not symbol or symbol.upper() == "UNKNOWN":
             logger.error(f"无效的 symbol: '{symbol}'，跳过保存快照")
             return {

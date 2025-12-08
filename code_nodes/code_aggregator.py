@@ -18,14 +18,19 @@ def check_data_completeness(target: dict) -> dict:
     1. targets.symbol (1个)
     2. targets.spot_price (1个)
     3. targets.walls (4个字段)
-    4. targets.gamma_metrics (11个字段)
+    4. targets.gamma_metrics (12个字段)
+       - vol_trigger, spot_vs_trigger, net_gex, gap_distance_dollar (4)
+       - nearby_peak.price, nearby_peak.abs_gex (2)
+       - next_cluster_peak.price, next_cluster_peak.abs_gex (2)
+       - monthly_data.cluster_strength.price, monthly_data.cluster_strength.abs_gex (2)
+       - weekly_data.cluster_strength.price, weekly_data.cluster_strength.abs_gex (2)
     5. targets.directional_metrics (5个字段)
     6. targets.atm_iv (3个字段)
     7. targets.validation_metrics (4个字段) - 允许 null，单独统计
     
-    核心字段：23个（1-6）
+    核心字段：26个（1-6）
     验证字段：4个（7）
-    总计：27个原始字段（不包括计算字段）
+    总计：30个原始字段（不包括计算字段）
     
     Args:
         target: targets 字典
@@ -35,8 +40,8 @@ def check_data_completeness(target: dict) -> dict:
             "is_complete": bool,          # 核心字段是否完整
             "missing_fields": [],         # 核心字段缺失列表
             "validation_missing": [],     # 验证字段缺失列表
-            "core_required": 23,
-            "total_required": 27,
+            "core_required": 26,
+            "total_required": 30,
             "core_provided": int,
             "provided": int,
             "completion_rate": int,       # 核心字段完成率
@@ -58,46 +63,63 @@ def check_data_completeness(target: dict) -> dict:
         if not is_valid_value(walls.get(field)):
             missing_fields.append(f"walls.{field}")
     
-    # 3. gamma_metrics (11个字段)
+    # 3. gamma_metrics (12个字段)
     gamma = target.get("gamma_metrics", {})
-    for field in ["vol_trigger", "spot_vs_trigger", "net_gex", 
-                  "gap_distance_dollar"]:
+    
+    # 基础字段 (4个)
+    for field in ["vol_trigger", "spot_vs_trigger", "net_gex", "gap_distance_dollar"]:
         if not is_valid_value(gamma.get(field)):
             missing_fields.append(f"gamma_metrics.{field}")
     
-    # 检查 nearby_peak (2个)
+    # nearby_peak (2个)
     nearby_peak = gamma.get("nearby_peak", {})
     if not isinstance(nearby_peak, dict):
-        missing_fields.append("gamma_metrics.nearby_peak")
+        missing_fields.append("gamma_metrics.nearby_peak.price")
+        missing_fields.append("gamma_metrics.nearby_peak.abs_gex")
     else:
         for field in ["price", "abs_gex"]:
             if not is_valid_value(nearby_peak.get(field)):
                 missing_fields.append(f"gamma_metrics.nearby_peak.{field}")
     
-    # 检查 next_cluster_peak (2个)
+    # next_cluster_peak (2个)
     next_cluster = gamma.get("next_cluster_peak", {})
     if not isinstance(next_cluster, dict):
-        missing_fields.append("gamma_metrics.next_cluster_peak")
+        missing_fields.append("gamma_metrics.next_cluster_peak.price")
+        missing_fields.append("gamma_metrics.next_cluster_peak.abs_gex")
     else:
         for field in ["price", "abs_gex"]:
             if not is_valid_value(next_cluster.get(field)):
                 missing_fields.append(f"gamma_metrics.next_cluster_peak.{field}")
     
-    # 检查 monthly_data（可选，但如果存在需要验证结构）
+    # 新增：monthly_data (2个)
     monthly_data = gamma.get("monthly_data", {})
-    if monthly_data and isinstance(monthly_data, dict):
-        monthly_cluster_strength = monthly_data.get("cluster_strength", {})
-        if isinstance(monthly_cluster_strength, dict):
-            # monthly_data 存在且结构正确，算作有效
-            pass
+    if not isinstance(monthly_data, dict):
+        missing_fields.append("gamma_metrics.monthly_data.cluster_strength.price")
+        missing_fields.append("gamma_metrics.monthly_data.cluster_strength.abs_gex")
+    else:
+        monthly_cluster = monthly_data.get("cluster_strength", {})
+        if not isinstance(monthly_cluster, dict):
+            missing_fields.append("gamma_metrics.monthly_data.cluster_strength.price")
+            missing_fields.append("gamma_metrics.monthly_data.cluster_strength.abs_gex")
+        else:
+            for field in ["price", "abs_gex"]:
+                if not is_valid_value(monthly_cluster.get(field)):
+                    missing_fields.append(f"gamma_metrics.monthly_data.cluster_strength.{field}")
     
-    # 检查 weekly_data（可选，但如果存在需要验证结构）
+    # 新增：weekly_data (2个)
     weekly_data = gamma.get("weekly_data", {})
-    if weekly_data and isinstance(weekly_data, dict):
-        weekly_cluster_strength = weekly_data.get("cluster_strength", {})
-        if isinstance(weekly_cluster_strength, dict):
-            # weekly_data 存在且结构正确，算作有效
-            pass
+    if not isinstance(weekly_data, dict):
+        missing_fields.append("gamma_metrics.weekly_data.cluster_strength.price")
+        missing_fields.append("gamma_metrics.weekly_data.cluster_strength.abs_gex")
+    else:
+        weekly_cluster = weekly_data.get("cluster_strength", {})
+        if not isinstance(weekly_cluster, dict):
+            missing_fields.append("gamma_metrics.weekly_data.cluster_strength.price")
+            missing_fields.append("gamma_metrics.weekly_data.cluster_strength.abs_gex")
+        else:
+            for field in ["price", "abs_gex"]:
+                if not is_valid_value(weekly_cluster.get(field)):
+                    missing_fields.append(f"gamma_metrics.weekly_data.cluster_strength.{field}")
     
     # 4. directional_metrics (5个字段)
     directional = target.get("directional_metrics", {})
@@ -136,15 +158,15 @@ def check_data_completeness(target: dict) -> dict:
                     "reason": "字段缺失"
                 })
     
-    # 核心字段统计 (23个)
-    core_required = 23
+    # 核心字段统计 (26个)
+    core_required = 26
     core_provided = core_required - len(missing_fields)
     
     # 验证字段统计 (4个)
     validation_provided = 4 - len(validation_missing)
     
-    # 总字段统计 (27个)
-    total_required = 27
+    # 总字段统计 (30个)
+    total_required = 30
     total_provided = core_provided + validation_provided
     
     return {

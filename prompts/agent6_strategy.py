@@ -102,6 +102,28 @@ def get_user_prompt(agent5_result: dict, code3_data: dict, agent3_data: dict) ->
     
     # 提取 Agent 5 场景
     scenario_content = agent5_result.get("content", {})
+    
+    # 防御性检查：如果 scenario_content 是字符串，尝试解析为 JSON
+    if isinstance(scenario_content, str):
+        # 清理 Markdown 代码块标记
+        clean_text = scenario_content.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:]
+        elif clean_text.startswith("```"):
+            clean_text = clean_text[3:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+        
+        try:
+            scenario_content = json.loads(clean_text)
+        except json.JSONDecodeError:
+            scenario_content = {}
+    
+    # 确保 scenario_content 是字典
+    if not isinstance(scenario_content, dict):
+        scenario_content = {}
+    
     scenario_class = scenario_content.get("scenario_classification", {})
     primary_scenario = scenario_class.get("primary_scenario", "未知")
     

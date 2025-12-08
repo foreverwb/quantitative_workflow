@@ -12,12 +12,21 @@ Swing Quant Workflow - 主程序入口（优化版）
 """
 
 import sys
+import os
 import json
 from pathlib import Path
 from datetime import datetime
 import click
 from rich.console import Console
 from loguru import logger
+
+# ⭐ 关键修复：确保在任意目录运行时都能正确找到项目资源
+# 计算项目根目录（基于 app.py 的位置）
+PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_MODEL_CONFIG = str(PROJECT_ROOT / "config" / "model_config.yaml")
+
+# 切换工作目录到项目根目录（确保相对路径正常工作）
+os.chdir(PROJECT_ROOT)
 
 from core.model_client import ModelClientFactory
 from commands import AnalyzeCommand, RefreshCommand
@@ -152,7 +161,7 @@ def cli():
 @click.option('-p', '--params', 'params_input', help='市场参数 JSON 或文件路径')
 @click.option('-c', '--cache', help='缓存文件名 (如 NVDA_20251206.json)')
 @click.option('-o', '--output', type=click.Path(), help='输出文件路径')
-@click.option('--model-config', default='config/model_config.yaml', help='模型配置文件')
+@click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
 def analyze(symbol: str, folder: str, params_input: str, cache: str, output: str, model_config: str):
     """
     智能分析命令
@@ -268,7 +277,7 @@ def analyze(symbol: str, folder: str, params_input: str, cache: str, output: str
 @click.option('-c', '--cache', help='缓存文件名')
 @click.option('-o', '--output', type=click.Path(), help='输出文件路径')
 @click.option('--va-url', default='http://localhost:8668', help='VA API 服务地址')
-@click.option('--model-config', default='config/model_config.yaml', help='模型配置文件')
+@click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
 def quick(symbol: str, vix: float, folder: str, cache: str, output: str, va_url: str, model_config: str):
     """
     快速分析命令 - 自动从 VA API 获取市场参数
@@ -400,7 +409,7 @@ def quick(symbol: str, vix: float, folder: str, cache: str, output: str, va_url:
 @click.option('-f', '--folder', required=True, type=click.Path(exists=True), help='数据文件夹路径')
 @click.option('-c', '--cache', required=True, help='缓存文件名')
 @click.option('-o', '--output', type=click.Path(), help='输出文件路径')
-@click.option('--model-config', default='config/model_config.yaml', help='模型配置文件')
+@click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
 def update(symbol: str, folder: str, cache: str, output: str, model_config: str):
     """
     增量更新命令
@@ -454,7 +463,7 @@ def update(symbol: str, folder: str, cache: str, output: str, model_config: str)
 @click.argument('symbol')
 @click.option('-f', '--folder', required=True, type=click.Path(exists=True), help='数据文件夹路径')
 @click.option('-c', '--cache', required=True, help='缓存文件名')
-@click.option('--model-config', default='config/model_config.yaml', help='模型配置文件')
+@click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
 def refresh(symbol: str, folder: str, cache: str, model_config: str):
     """
     刷新快照命令

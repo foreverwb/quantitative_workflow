@@ -29,7 +29,7 @@ class WorkflowEngine:
         self.model_client = model_client
         # 展开 config 到扁平化 env_vars（供 code_nodes 使用）
         self.env_vars = expand_config_to_env_vars(env_vars)
-        self.cache_file = cache_file  # ⭐ 新增：支持指定缓存文件
+        self.cache_file = cache_file  # 新增：支持指定缓存文件
         
         # 依赖注入
         self.state_manager = StateManager()

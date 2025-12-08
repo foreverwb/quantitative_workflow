@@ -58,9 +58,9 @@ class MarketStateCalculator:
             if vix > 25:
                 params.update({
                     "dyn_strikes": 50,
-                    "dyn_dte_short": "3w",
-                    "dyn_dte_mid": "7w",
-                    "dyn_dte_long_backup": "14w",
+                    "dyn_dte_short": "3 w",
+                    "dyn_dte_mid": "7 w",
+                    "dyn_dte_long_backup": "14 w",
                     "dyn_window": 20,
                 })
             # 场景 2: Squeeze / Panic (个股独角戏)
@@ -68,8 +68,8 @@ class MarketStateCalculator:
             else:
                 params.update({
                     "dyn_strikes": 45,
-                    "dyn_dte_short": "7w",
-                    "dyn_dte_mid": "14w",
+                    "dyn_dte_short": "7 w",
+                    "dyn_dte_mid": "14 w",
                     "dyn_dte_long_backup": "30 w",
                     "dyn_window": 45,
                 })
@@ -90,8 +90,8 @@ class MarketStateCalculator:
             else:
                 params.update({
                     "dyn_strikes": 35,
-                    "dyn_dte_short": "21w",
-                    "dyn_dte_mid": "45w",
+                    "dyn_dte_short": "21 w",
+                    "dyn_dte_mid": "45 w",
                     "dyn_dte_long_backup": "60 m",
                     "dyn_window": 60,
                 })

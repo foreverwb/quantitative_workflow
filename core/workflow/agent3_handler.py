@@ -146,7 +146,7 @@ class Agent3Handler:
             "symbol": data.get("symbol", "UNKNOWN"),
             "status": data.get("status", "missing_data"),
             "spot_price": data.get("spot_price", -999),
-            "em1_dollar": -999,  # ⭐ 计算字段设为 -999
+            "em1_dollar": -999,  # 计算字段设为 -999
             "walls": {},
             "gamma_metrics": {},
             "directional_metrics": {},

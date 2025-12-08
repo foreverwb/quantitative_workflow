@@ -1,7 +1,7 @@
 """
 模型客户端封装
 仅支持 OpenAI 兼容接口（包括 Responses API）
-⭐ 新增：支持 Strict JSON Schema Mode
+新增：支持 Strict JSON Schema Mode
 """
 
 import os
@@ -148,7 +148,7 @@ class ModelClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         json_schema: Optional[Dict] = None,
-        use_strict_mode: bool = True,  # ⭐ 新增参数
+        use_strict_mode: bool = True,  # 新增参数
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -171,7 +171,7 @@ class ModelClient:
             "temperature": temperature if temperature is not None else self.temperature
         }
         
-        # ⭐ 关键改进：支持 Strict JSON Schema
+        # 关键改进：支持 Strict JSON Schema
         if json_schema:
             if use_strict_mode:
                 # Strict Mode: 模型必须 100% 遵守 Schema
@@ -221,12 +221,12 @@ class ModelClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         json_schema: Optional[Dict] = None,
-        use_strict_mode: bool = True,  # ⭐ 新增参数
+        use_strict_mode: bool = True,  # 新增参数
         **kwargs
     ) -> Dict[str, Any]:
         """
         OpenAI Responses API 接口适配器（Vision 支持）
-        ⭐ 新增：支持 Strict JSON Schema Mode
+        新增：支持 Strict JSON Schema Mode
         
         Args:
             inputs: 输入列表（在 Agent3 中，这实际上是 messages 列表）
@@ -245,7 +245,7 @@ class ModelClient:
             "temperature": temperature if temperature is not None else self.temperature
         }
         
-        # ⭐ 关键改进：支持 Strict JSON Schema（视觉模型）
+        # 关键改进：支持 Strict JSON Schema（视觉模型）
         if json_schema:
             if use_strict_mode:
                 # Strict Mode: 视觉模型也支持
@@ -264,7 +264,7 @@ class ModelClient:
                 request_params["response_format"] = {"type": "json_object"}
                 logger.debug("ℹ️ 使用兼容 JSON 模式（非严格）")
         
-        # ⭐ 对于视觉模型，在 system prompt 中强调 JSON 输出（双重保险）
+        # 对于视觉模型，在 system prompt 中强调 JSON 输出（双重保险）
         if self.supports_vision and json_schema:
             for msg in inputs:
                 if msg.get("role") == "system":
@@ -391,14 +391,14 @@ class ModelClientManager:
         messages: List[Dict[str, Any]],
         agent_name: str = "default",
         json_schema: Optional[Dict] = None,
-        use_strict_mode: bool = True,  # ⭐ 新增参数
+        use_strict_mode: bool = True,  # 新增参数
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         统一的聊天补全接口
-        ⭐ 新增：支持 Strict JSON Schema Mode
+        新增：支持 Strict JSON Schema Mode
         
         Args:
             messages: 消息列表
@@ -444,14 +444,14 @@ class ModelClientManager:
         inputs: List[Dict[str, Any]],
         agent_name: str = "agent3",
         json_schema: Optional[Dict] = None,
-        use_strict_mode: bool = True,  # ⭐ 新增参数
+        use_strict_mode: bool = True,  # 新增参数
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         OpenAI Responses API 接口（用于 Agent3 多图片输入）
-        ⭐ 新增：支持 Strict JSON Schema Mode
+        新增：支持 Strict JSON Schema Mode
         
         Args:
             inputs: 输入列表

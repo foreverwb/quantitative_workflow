@@ -33,6 +33,18 @@ from .console_printer import (
     print_info
 )
 
+# 安全格式化工具
+from .formatters import (
+    fmt_int,
+    fmt_float,
+    fmt_pct,
+    fmt_currency,
+    fmt_signed,
+    F,
+    SafeFormatter,
+    safe_format
+)
+
 __all__ = [
     'config',
     'ConfigLoader',
@@ -62,5 +74,15 @@ __all__ = [
     'print_warning',
     'print_info',
     
-    'print_error_summary'
+    'print_error_summary',
+    
+    # 安全格式化工具
+    'fmt_int',
+    'fmt_float',
+    'fmt_pct',
+    'fmt_currency',
+    'fmt_signed',
+    'F',
+    'SafeFormatter',
+    'safe_format',
 ]
