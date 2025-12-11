@@ -35,6 +35,42 @@ class FieldCalculator:
         self.market_params = market_params or {}
         self.event_data = event_data or {}
     
+    def _perform_sanity_check(self, targets: Dict) -> Tuple[bool, list]:
+        """
+        金融逻辑校验 (Sanity Check)
+        防止 Agent 3 读取极其离谱的数值（幻觉过滤）
+        """
+        errors = []
+        spot = targets.get('spot_price')
+        
+        # 1. 基础价格检查
+        if not isinstance(spot, (int, float)) or spot <= 0:
+            errors.append(f"现价异常: {spot}")
+            return False, errors
+            
+        # 2. 墙位距离检查 (防止把 5000 的 SPX 墙安在 500 的个股上)
+        # 阈值：墙位不应偏离现价 50% 以上 (除非是极其疯狂的 meme 股)
+        walls = targets.get('walls', {})
+        for name, price in walls.items():
+            if isinstance(price, (int, float)) and price > 0:
+                diff_pct = abs(price - spot) / spot
+                if diff_pct > 0.5:
+                    errors.append(f"{name} {price} 偏离现价 {spot} 超过 50% ({diff_pct:.1%})")
+        
+        # 3. IV 范围检查
+        # ATM IV 通常在 0.1 (10%) 到 3.0 (300%) 之间
+        atm_iv = targets.get('atm_iv', {})
+        for name, iv in atm_iv.items():
+            if isinstance(iv, (int, float)):
+                # 兼容百分比 (30) 和小数 (0.3)
+                iv_val = iv / 100.0 if iv > 5 else iv 
+                if iv_val > 5.0: # 500% IV 极不可能
+                    errors.append(f"{name} {iv} 异常过高")
+                if iv_val < 0.05 and iv_val > 0: # 5% 以下极罕见
+                    errors.append(f"{name} {iv} 异常过低")
+                    
+        return len(errors) == 0, errors
+    
     def get_beta(self, symbol: str) -> float:
         """
         获取股票 Beta 值
@@ -212,6 +248,8 @@ class FieldCalculator:
                 targets = {}
         
         missing_fields = []
+        # Sanity Check
+        is_sane, sanity_errors = self._perform_sanity_check(targets)
         
         # 1. 顶层字段 (2个)
         if not self._is_valid_value(targets.get('symbol')):
@@ -278,6 +316,11 @@ class FieldCalculator:
         total_missing = len(missing_fields) + len(validation_missing)
         total_provided = total_required - total_missing
         
+        # 注入 Sanity 结果
+        if not is_sane:
+            for err in sanity_errors:
+                missing_fields.append({"field": "SANITY_CHECK", "path": "root", "reason": err, "severity": "critical"})
+        
         return {
             "is_complete": len(missing_fields) == 0,  # 核心字段完整即可
             "missing_fields": missing_fields,
@@ -287,7 +330,9 @@ class FieldCalculator:
             "provided": total_provided,
             "core_provided": core_provided,
             "completion_rate": int((core_provided / core_required) * 100),
-            "validation_rate": int(((4 - len(validation_missing)) / 4) * 100) if validation_metrics else 0
+            "validation_rate": int(((4 - len(validation_missing)) / 4) * 100) if validation_metrics else 0,
+            "sanity_passed": is_sane,
+            "sanity_errors": sanity_errors
         }
     
     def calculate_all(self, data: Dict) -> Dict:

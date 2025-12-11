@@ -1,10 +1,9 @@
 """
-Agent 5: 场景分析 Schema (v2.0)
+Agent 5: 场景分析 Schema (v2.1)
 
 变更:
-1. scenarios 数组增加 validation_warnings 字段
-2. 新增 validation_summary 顶层字段
-3. scenario_classification 增加详细字段
+1. 将 validation_summary 加入顶层 required
+2. 将 validation_warnings 加入 scenarios required
 """
 
 
@@ -17,7 +16,8 @@ def get_schema() -> dict:
             "scoring",
             "scenario_classification",
             "scenarios",
-            "entry_threshold_check"
+            "validation_summary",    
+            "entry_threshold_check" 
         ],
         "properties": {
             
@@ -45,7 +45,8 @@ def get_schema() -> dict:
                         "type": "string",
                         "description": "Gamma Regime 说明"
                     }
-                }
+                },
+                "additionalProperties": False
             },
             
             # ==========================================
@@ -65,7 +66,8 @@ def get_schema() -> dict:
                         "enum": ["panic", "normal", "calm"],
                         "description": "权重模式"
                     }
-                }
+                },
+                "additionalProperties": False
             },
             
             # ==========================================
@@ -98,21 +100,28 @@ def get_schema() -> dict:
                             "properties": {
                                 "type": {"type": "string"},
                                 "probability": {"type": "integer"}
-                            }
+                            },
+                            "additionalProperties": False
                         }
                     }
-                }
+                },
+                "additionalProperties": False
             },
             
             # ==========================================
-            # 4. 场景详情数组 (新增)
+            # 4. 场景详情数组 (含验证警告)
             # ==========================================
             "scenarios": {
                 "type": "array",
                 "description": "3-5 个差异化场景",
                 "items": {
                     "type": "object",
-                    "required": ["scenario_name", "probability", "direction"],
+                    "required": [
+                        "scenario_name", 
+                        "probability", 
+                        "direction",
+                        "validation_warnings" 
+                    ],
                     "properties": {
                         "scenario_name": {
                             "type": "string",
@@ -158,7 +167,8 @@ def get_schema() -> dict:
                                 "resistance": {"type": "number"},
                                 "pivot": {"type": "number"}
                             },
-                            "description": "关键价格位"
+                            "description": "关键价格位",
+                            "additionalProperties": False
                         },
                         "validation_warnings": {
                             "type": "array",
@@ -169,16 +179,18 @@ def get_schema() -> dict:
                             "type": "string",
                             "description": "补充说明"
                         }
-                    }
+                    },
+                    "additionalProperties": False
                 }
             },
             
             # ==========================================
-            # 5. 验证摘要 (新增)
+            # 5. 验证摘要 (新增顶层字段)
             # ==========================================
             "validation_summary": {
                 "type": "object",
                 "description": "【新增】validation_metrics 检查摘要",
+                "required": ["warnings", "overall_confidence_adjustment"],
                 "properties": {
                     "has_fake_breakout_risk": {
                         "type": "boolean",
@@ -202,7 +214,8 @@ def get_schema() -> dict:
                         "items": {"type": "string"},
                         "description": "所有验证警告汇总"
                     }
-                }
+                },
+                "additionalProperties": False
             },
             
             # ==========================================
@@ -211,7 +224,7 @@ def get_schema() -> dict:
             "entry_threshold_check": {
                 "type": "string",
                 "enum": ["入场", "轻仓试探", "观望"],
-                "description": "入场建议"
+                "description": "基于评分的入场建议"
             },
             "entry_rationale": {
                 "type": "string",
@@ -223,12 +236,14 @@ def get_schema() -> dict:
             # ==========================================
             "key_levels": {
                 "type": "object",
+                "description": "全市场关键价位汇总",
                 "properties": {
                     "support": {"type": "number"},
                     "resistance": {"type": "number"},
                     "trigger_line": {"type": "number"},
                     "current_spot": {"type": "number"}
-                }
+                },
+                "additionalProperties": False
             },
             
             # ==========================================
@@ -236,7 +251,8 @@ def get_schema() -> dict:
             # ==========================================
             "risk_warning": {
                 "type": "string",
-                "description": "风险警示信息"
+                "description": "综合风险警示信息"
             }
-        }
+        },
+        "additionalProperties": False
     }

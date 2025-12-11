@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import re
 import urllib.request
 import urllib.error
+from utils.config_loader import config
 
 # 全局缓存字典（在工作流生命周期内保持）
 _earnings_cache = {}
@@ -211,10 +212,12 @@ def main(user_query: str, **env_vars) -> dict:
         user_query: 用户查询字符串（包含股票代码）
         **env_vars: 环境变量字典
     """
-    api_key = env_vars.get('ALPHA_VANTAGE_API_KEY', '')
-    url = env_vars.get('ALPHA_VANTAGE_API_URL', 'https://www.alphavantage.co/query?')
-    enable_api = env_vars.get('ENABLE_EARNINGS_API', True)
-    cache_days = env_vars.get('EARNINGS_CACHE_DAYS', 30)
+    av_config = config.get_section('alpha_vantage')
+    
+    api_key = av_config.get('api_key', '')
+    url = av_config.get('api_url', 'https://www.alphavantage.co/query?')
+    enable_api = av_config.get('enable_earnings_api', True)
+    cache_days = av_config.get('earnings_cache_days', 30)
     
     match = re.search(r'\b([A-Z]{1,5})\b', user_query.upper())
     symbol = match.group(1) if match else "UNKNOWN"
