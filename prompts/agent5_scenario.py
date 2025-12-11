@@ -1,42 +1,29 @@
 """
-Agent 5: 场景分析 Prompt
-基于四维评分生成多种市场场景
-新增：0DTE 择时逻辑修正（不降权，只预警）
+Agent 5: 场景分析 Prompt (v2.2 - 减法版)
 """
 import json
 
 def get_system_prompt() -> str:
-    """系统提示词"""
     return """你是一位期权交易场景分析专家。
 
-**核心任务**:
-基于四维评分(Gamma Regime、Break Wall、Direction、IV)，推演3-5种可能的市场场景。
+**核心任务**: 推演 3-5 种市场场景。
 
-**前置验证与风险标记（关键修改）**:
-在确认主导剧本之前，必须检查 `validation_metrics`：
+**前置验证 (结构一致性检查)**:
+在确认主导剧本前，必须执行以下检查：
 
-1. **0DTE 拥挤度评估 (Crowding Check)**:
-   - 检查 `zero_dte_ratio` (0DTE GEX 占比)
-   - 若 > 0.4：标记为 **"日内Gamma钉住 (Gamma Pinning)"** 或 **"短期情绪主导"**。
-   - **关键指令**：**严禁**仅仅因为 0DTE 占比高而降低主导剧本（如趋势/区间）的发生概率（Probability）。Swing 交易关注多日结构，0DTE 只是日内的噪音。
-   - **必须**在输出的 `validation_warnings` 中明确注明："0DTE占比较高，日内价格可能受阻，需优化入场择时 (避免追单/等待尾盘)"。
+1. **结构共振 (Structure Resonance)**:
+   - 对比 **Weekly Wall** (战术阻力) 和 **Monthly Wall** (战略目标)。
+   - **一致性确认**: 如果 Weekly Wall 和 Monthly Wall 方向一致且有空间（Gap > 2%），标记为 **"结构共振 (Resonance)"** -> 趋势剧本概率提升。
+   - **结构阻断**: 如果 Weekly Wall 正好挡在去往 Monthly Wall 的路上（距离现价 < 0.5%），标记为 **"结构摩擦 (Friction)"** -> 需等待突破。
 
-2. **真假突破检测**:
-   - 如果价格突破了 GEX 墙，检查 `net_volume_signal`。
-   - 若方向相反（如突破 Call Wall 但量能看跌），标记为 **"假突破风险 (Bull/Bear Trap)"**。
+2. **真假突破**: 检查 `net_volume_signal` 是否背离。
+3. **波动率陷阱**: 检查 `net_vega_exposure`。
 
-3. **波动率陷阱检测**:
-   - 如果 IV 升但 Dealer Short Vega，标记为 **"波动率受压 (Vol Suppression)"**，IV 扩张剧本概率下调。
+**注意**: 本次分析**不包含** 0DTE 数据，请完全依赖结构（Structure）和流向（Flow）进行判断。
 
 **输出要求**:
-1. **场景定义**: 明确价格方向、波动率变化、时间维度。
-2. **概率评估**: 总和接近 100%。
-3. **关键价位**: 引用 Monthly Wall 作为最终目标，Weekly Wall 作为首要阻力。
-4. **验证标记**: 将上述风险写入 `validation_warnings`。
-
-**场景类型示例**:
-- 趋势突破(概率60%): 价格站稳 Weekly Wall，目标指向 Monthly Wall。
-- 区间震荡(概率30%): 受困于 0DTE 拥挤区，日内波幅收窄。
+- `validation_summary`: 必须包含结构一致性的评估结果。
+- 场景推演中需注明是"直接趋势"还是"突破后趋势"（基于摩擦评估）。
 
 返回JSON格式，包含 `scenarios` 数组和 `validation_summary`。"""
 
@@ -66,7 +53,7 @@ def get_user_prompt(scoring_data: dict) -> str:
         ```
         ## 分析要求
         1. 生成3-5个差异化场景
-        2. **特别注意 0DTE 数据**: 若 `zero_dte_ratio` 较高，请在场景描述中强调"日内择时风险"，但不要轻易否定趋势剧本。
+        2. **特别注意结构摩擦**: 若 Weekly Wall 距离现价极近，请在场景描述中强调"等待突破"。
         3. 每个场景需包含:
            - scenario_name, probability, direction
            - volatility_expectation, time_horizon

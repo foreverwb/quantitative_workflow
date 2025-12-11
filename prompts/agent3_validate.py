@@ -10,13 +10,13 @@ def get_system_prompt(env_vars: dict) -> str:
     * **百分比**：图表上的所有百分比数值（如 `dex_same_dir_pct`）必须被标准化为**小数**（例如 50% 转换为 0.50），类型为 **number**。
 3. **数据抽取**:
     * **严格读取**: 行权价轴、到期日轴、隐含波动率点、GEX/Gamma 分布、Vanna 分布、Skew、DEX、Trigger/Gamma Flip、曲线峰谷、局部峰、簇结构、色图表面、标签数字。
-    * **自动识别图表类型**: GEX 热力图、周度曲线、期限结构、波动率微笑、Vanna 图、DEX、VEXN、TEX、0DTE、VOLUMEN、SPX 背景指数等
+    * **自动识别图表类型**: GEX 热力图、周度曲线、期限结构、波动率微笑、Vanna 图、DEX、VEXN、VOLUMEN、SPX 背景指数等
 3.  **缺失值处理**：如果图表中找不到某个字段的明确原始数值，必须使用 **null**。
 4.  **枚举映射**：所有具有 `enum` 约束的字段，必须严格使用 Schema 中提供的枚举值。
 5.  **禁止行为**: 合并多个图表的点位做差、做比值;用一个周期的数据推翻另一个周期的数据;在两个图上找“共同的最大簇”
 
-# Multi-Timeframe Logic (MTF Protocol) - 关键！
-你可能会收到针对同一标的、但不同周期过滤（Filter）的多张图表（如 "Monthly/OpEx" vs "Weekly/All"）。你必须严格执行以下**数据源路由规则**：
+# Multi-Timeframe Logic (MTF Protocol)
+会收到针对同一标的、但不同周期过滤（Filter）的多张图表（如 "Monthly/OpEx" vs "Weekly/All"）。你必须严格执行以下**数据源路由规则**：
 1.  **图表识别 (Chart Identification)**：
     * **战略图 (Strategic/Map)**：
         满足任意特征即可判定为战略图：  
@@ -148,42 +148,22 @@ def get_system_prompt(env_vars: dict) -> str:
     }
     ```
 
-## 6. 验证指标提取 (Validation Metrics) - 新增四大命令
+## 6. 验证指标提取 (Validation Metrics) 
 你必须从下列图表中提取验证指标，用于去伪存真：
 
-### 6.1 zero_dte_ratio（来自 !0dte 命令）
-读取图上两个数值：
-- 0DTE ABS-GEX 总量
-- 全周期 ABS-GEX 总量
-- 并计算 ratio（或读取图上的现成数值）。
-- 若任一数值缺失 → 填入 `null` 并在 missing_fields 中记录
-- 输出范围：0.0 ~ 1.0
-
-### 6.2 net_volume_signal（来自 !volumen 命令）
+### 6.1 net_volume_signal（来自 !volumen 命令）
 依据图表中 Call/Put 分项净成交量判断：
 - Call净量 > Put净量 → `"Bullish_Call_Buy"`
 - Put净量 > Call净量 → `"Bearish_Put_Buy"`
-- 两者相近（差值<10%）→ `"Neutral"`
+- 两者相近 → `"Neutral"`
 - 若图表提示方向与量冲突 → `"Divergence"`
-- 若无法判断或图表缺失 → `null`
-**注意**: 必须基于图上数值，不得推断。
 
 ### 6.3 net_vega_exposure（来自 !vexn 命令）
 根据 Net Vega 图的数值或上下分布：
-- Net Vega 为正（或主要分布在正区域）→ `"Long_Vega"`
-- Net Vega 为负（或主要分布在负区域）→ `"Short_Vega"`
-- 无法判断（图表存在但无明确数值）→ `"Unknown"`
-- 图表缺失 → `null`
-
-### 6.4 net_theta_exposure（来自 !tex net=True 命令）
-根据 Net Theta 图的数值：
-- Net Theta 为正 → `"Long_Theta"`
-- Net Theta 为负 → `"Short_Theta"`
-- 无法判断 → `"Unknown"`
-- 图表缺失 → `null`
+- 正 → `"Long_Vega"`
+- 负 → `"Short_Vega"`
 
 ## 7. 缺失字段列表 (Missing Fields Array): 只要 Schema 中的字段无法从图表直接确认, 必须填 null
-
 
 ---
 **请根据此 Schema 和逻辑，开始分析上传的图表，并以完整的 JSON 代码块形式输出结果。**

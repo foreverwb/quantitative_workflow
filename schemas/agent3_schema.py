@@ -1,20 +1,19 @@
 """
 Agent 3 JSON Schema - 修复版（符合 Vision Structured Output 规范）
 
-修复要点：
-1. 确保 required 和 properties 的键完全一致
-2. 使用 patternProperties 支持动态指数
-3. 移除 additionalProperties（Strict Mode 自动禁止）
+变更:
+1. 移除 zero_dte_ratio 和 net_theta_exposure (减法)
+2. 保留 net_volume_signal 和 net_vega_exposure
 """
 
 def get_schema() -> dict:
     """返回 Agent 3 的 JSON Schema（Vision Strict Mode 兼容版）"""
     return {
         "type": "object",
-        "required": ["timestamp", "targets", "indices"],  # ✅ 与 properties 键一致
+        "required": ["timestamp", "targets", "indices"],
         "properties": {
             # ============================================
-            # 1. 时间戳（必需）
+            # 1. 时间戳
             # ============================================
             "timestamp": {
                 "type": "string",
@@ -22,7 +21,7 @@ def get_schema() -> dict:
             },
             
             # ============================================
-            # 2. 标的数据（必需）
+            # 2. 标的数据
             # ============================================
             "targets": {
                 "type": "object",
@@ -38,7 +37,7 @@ def get_schema() -> dict:
                 "properties": {
                     "symbol": {
                         "type": "string",
-                        "description": "股票代码（如 NVDA）"
+                        "description": "股票代码"
                     },
                     
                     "spot_price": {
@@ -58,22 +57,12 @@ def get_schema() -> dict:
                             "major_wall_type"
                         ],
                         "properties": {
-                            "call_wall": {
-                                "type": "number",
-                                "description": "Call 墙位价格"
-                            },
-                            "put_wall": {
-                                "type": "number",
-                                "description": "Put 墙位价格"
-                            },
-                            "major_wall": {
-                                "type": "number",
-                                "description": "主墙位价格"
-                            },
+                            "call_wall": {"type": "number"},
+                            "put_wall": {"type": "number"},
+                            "major_wall": {"type": "number"},
                             "major_wall_type": {
                                 "type": "string",
-                                "enum": ["call", "put", "N/A"],
-                                "description": "主墙类型"
+                                "enum": ["call", "put", "N/A"]
                             }
                         },
                         "additionalProperties": False
@@ -95,59 +84,38 @@ def get_schema() -> dict:
                             "weekly_data"
                         ],
                         "properties": {
-                            "vol_trigger": {
-                                "type": "number",
-                                "description": "VOL_TRIGGER / Gamma Flip 价格"
-                            },
+                            "vol_trigger": {"type": "number"},
                             "spot_vs_trigger": {
                                 "type": "string",
-                                "enum": ["above", "below", "near", "N/A"],
-                                "description": "现价相对 Trigger 的位置"
+                                "enum": ["above", "below", "near", "N/A"]
                             },
                             "net_gex": {
                                 "type": "string",
-                                "enum": ["positive_gamma", "negative_gamma"],
-                                "description": "净 Gamma 方向"
+                                "enum": ["positive_gamma", "negative_gamma"]
                             },
                             
-                            # 近旁峰高
+                            # 近旁峰高 (关键战术数据)
                             "nearby_peak": {
                                 "type": "object",
                                 "required": ["price", "abs_gex"],
                                 "properties": {
-                                    "price": {
-                                        "type": "number",
-                                        "description": "峰值价格"
-                                    },
-                                    "abs_gex": {
-                                        "type": "number",
-                                        "description": "绝对 GEX 值"
-                                    }
+                                    "price": {"type": "number"},
+                                    "abs_gex": {"type": "number"}
                                 },
                                 "additionalProperties": False
                             },
                             
-                            # 下一簇峰高
                             "next_cluster_peak": {
                                 "type": "object",
                                 "required": ["price", "abs_gex"],
                                 "properties": {
-                                    "price": {
-                                        "type": "number",
-                                        "description": "簇峰价格"
-                                    },
-                                    "abs_gex": {
-                                        "type": "number",
-                                        "description": "簇峰 GEX 值"
-                                    }
+                                    "price": {"type": "number"},
+                                    "abs_gex": {"type": "number"}
                                 },
                                 "additionalProperties": False
                             },
                             
-                            "gap_distance_dollar": {
-                                "type": "number",
-                                "description": "到主墙的美元距离"
-                            },
+                            "gap_distance_dollar": {"type": "number"},
                             
                             # 月度数据
                             "monthly_data": {
@@ -201,29 +169,22 @@ def get_schema() -> dict:
                             "iv_path_confidence"
                         ],
                         "properties": {
-                            "dex_same_dir_pct": {
-                                "type": "number",
-                                "description": "DEX 同向百分比（0.0-1.0）"
-                            },
+                            "dex_same_dir_pct": {"type": "number"},
                             "vanna_dir": {
                                 "type": "string",
-                                "enum": ["up", "down", "flat", "N/A"],
-                                "description": "Vanna 方向"
+                                "enum": ["up", "down", "flat", "N/A"]
                             },
                             "vanna_confidence": {
                                 "type": "string",
-                                "enum": ["high", "medium", "low", "N/A"],
-                                "description": "Vanna 置信度"
+                                "enum": ["high", "medium", "low", "N/A"]
                             },
                             "iv_path": {
                                 "type": "string",
-                                "enum": ["升", "降", "平", "数据不足"],
-                                "description": "IV 路径趋势"
+                                "enum": ["升", "降", "平", "数据不足"]
                             },
                             "iv_path_confidence": {
                                 "type": "string",
-                                "enum": ["high", "medium", "low", "N/A"],
-                                "description": "IV 路径置信度"
+                                "enum": ["high", "medium", "low", "N/A"]
                             }
                         },
                         "additionalProperties": False
@@ -236,40 +197,27 @@ def get_schema() -> dict:
                         "type": "object",
                         "required": ["iv_7d", "iv_14d", "iv_source"],
                         "properties": {
-                            "iv_7d": {
-                                "type": "number",
-                                "description": "7 日 ATM IV"
-                            },
-                            "iv_14d": {
-                                "type": "number",
-                                "description": "14 日 ATM IV"
-                            },
+                            "iv_7d": {"type": "number"},
+                            "iv_14d": {"type": "number"},
                             "iv_source": {
                                 "type": "string",
-                                "enum": ["7d", "14d", "21d_fallback", "N/A"],
-                                "description": "IV 数据来源"
+                                "enum": ["7d", "14d", "21d_fallback", "N/A"]
                             }
                         },
                         "additionalProperties": False
                     },
                     
                     # ------------------------
-                    # 2.5 验证指标（新增）
+                    # 2.5 验证指标 (减法后)
                     # ------------------------
                     "validation_metrics": {
                         "type": "object",
-                        "description": "验证型数据，用于去伪存真",
+                        "description": "验证型数据，已移除高噪音指标",
                         "required": [
-                            "zero_dte_ratio",
                             "net_volume_signal",
-                            "net_vega_exposure",
-                            "net_theta_exposure"
+                            "net_vega_exposure"
                         ],
                         "properties": {
-                            "zero_dte_ratio": {
-                                "type": ["number", "null"],
-                                "description": "0DTE GEX 占总 GEX 的比例 (0-1)，来自 !0dte 命令"
-                            },
                             "net_volume_signal": {
                                 "type": ["string", "null"],
                                 "enum": ["Bullish_Call_Buy", "Bearish_Put_Buy", "Neutral", "Divergence", None],
@@ -279,11 +227,6 @@ def get_schema() -> dict:
                                 "type": ["string", "null"],
                                 "enum": ["Long_Vega", "Short_Vega", "Unknown", None],
                                 "description": "Dealer Vega 敞口，来自 !vexn 命令"
-                            },
-                            "net_theta_exposure": {
-                                "type": ["string", "null"],
-                                "enum": ["Long_Theta", "Short_Theta", "Unknown", None],
-                                "description": "Dealer Theta 敞口，来自 !tex net=True 命令"
                             }
                         },
                         "additionalProperties": False
@@ -293,11 +236,10 @@ def get_schema() -> dict:
             },
             "indices": {
                 "type": "object",
-                "description": "指数背景数据（仅包含实际上传的指数）",
-                "required": [],  # ✅ 空数组，因为指数是动态的
-                "properties": {},  # ✅ 空对象，使用 patternProperties
+                "description": "指数背景数据",
+                "required": [],
+                "properties": {},
                 "patternProperties": {
-                    # 匹配任意 2-5 个大写字母的指数代码
                     "^[A-Z]{2,5}$": {
                         "type": "object",
                         "required": [
@@ -309,26 +251,16 @@ def get_schema() -> dict:
                         "properties": {
                             "net_gex_idx": {
                                 "type": "string",
-                                "enum": ["positive_gamma", "negative_gamma"],
-                                "description": "指数净 Gamma 方向"
+                                "enum": ["positive_gamma", "negative_gamma"]
                             },
-                            "spot_price_idx": {
-                                "type": "number",
-                                "description": "指数现价"
-                            },
-                            "iv_7d": {
-                                "type": "number",
-                                "description": "指数 7 日 ATM IV"
-                            },
-                            "iv_14d": {
-                                "type": "number",
-                                "description": "指数 14 日 ATM IV"
-                            }
+                            "spot_price_idx": {"type": "number"},
+                            "iv_7d": {"type": "number"},
+                            "iv_14d": {"type": "number"}
                         },
                         "additionalProperties": False
                     }
                 },
-                "additionalProperties": False  # ✅ 禁止非指数代码的键
+                "additionalProperties": False
             }
         },
         "additionalProperties": False

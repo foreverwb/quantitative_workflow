@@ -1,14 +1,7 @@
 """
 Agent 2: 命令清单生成
-用途：用户仅输入股票代码时，生成期权数据抓取命令清单
+用途：构建"战术(Weekly)"与"战略(Monthly)"双轨数据矩阵
 pre_calc: MarketStateCalculator 计算的参数字典
-{
-    "dyn_strikes": int,
-    "dyn_dte_short": str,
-    "dyn_dte_mid": str,
-    "dyn_dte_long_backup": str,
-    "dyn_window": int
-}
 """
 
 
@@ -26,17 +19,11 @@ def get_system_prompt(symbol: str, pre_calc: dict) -> str:
 **核心逻辑**: 
 我们将数据分为 [战术层-Weekly] 和 [战略层-Monthly]，利用 expiration_filter (w/m) 进行降噪。
 
-**动态参数配置**:
-- Strike 范围: {strikes}
-- 短期 DTE: {dte_short}
-- 中期 DTE: {dte_mid}
-- 长期 DTE: {dte_long}
-- Window: {window}
-
 ---
 
+#### 1. 核心结构 (Walls & Clusters) - 双轨制
 # [战术视图] 捕捉近端摩擦与周度博弈 (Weekly Friction)
-# 作用: 识别短期 Gamma Squeeze 风险和入场阻力
+# 作用: 替代 0DTE，识别本周内的 Gamma 阻力与爆发点
 !gexr {symbol} {strikes} {dte_short} w
 
 # [战略视图] 锁定机构核心仓位与磁力目标 (Monthly Structure)
@@ -68,21 +55,15 @@ def get_system_prompt(symbol: str, pre_calc: dict) -> str:
 # 确认 IV 趋势
 v_path: {symbol} 7D ATM-IV 对比 3 日 skew 数据
 
-# [择时检查] 检查 0DTE 拥挤度 (High 0DTE = 日内可能由情绪主导)
-!0dte {symbol}
-
-# [真实意图] 确认今日资金流向
+# [真实意图] 确认今日资金流向 (唯一保留的微观指标，用于证伪)
 !volumen {symbol} {strikes} {dte_short}
 
 # [波动率底牌] Dealer Vega 敞口
 !vexn {symbol} {strikes} {dte_mid}
 
-# [时间引力] Dealer Theta 敞口
-!tex {symbol} {strikes} {dte_mid} True
-
 #### 5. 扩展命令（条件触发）
-# 如果 dyn_dte_mid 已经是月度(m)
-!gexr {symbol} {strikes} {dte_long} m
+# 如果 dyn_dte_mid 已经是月度(m)，这里作为备份
+!gexr {symbol} {strikes} {dte_long} 
 
 #### 6. 指数背景（必需）
 !gexn SPX {window} 98
@@ -96,34 +77,31 @@ v_path: {symbol} 7D ATM-IV 对比 3 日 skew 数据
 
 ---
 **输出要求**:
-1. 严格输出纯文本命令列表
-2. 确保参数替换正确 (当前参数已动态计算完成)
+1. 严格按照上述命令序列输出，纯文本格式：
+- 命令说明
+- 执行命令
+2. 确保参数替换正确
 """
 
 def get_user_prompt(symbol: str, market_params: dict = None) -> str:
     """
-    获取用户提示词（修复：使用真实市场参数）
-    
-    Args:
-        symbol: 股票代码
-        market_params: 真实的市场参数 (vix, ivr, iv30, hv20)
+    获取用户提示词
     """
-    # 关键修复：使用用户实际输入的参数
+    # 使用用户实际输入的参数
     if market_params:
         vix = market_params.get('vix', 18.5)
         ivr = market_params.get('ivr', 50)
         iv30 = market_params.get('iv30', 30)
         hv20 = market_params.get('hv20', 25)
     else:
-        # 回退到示例值（不应该走到这里）
         vix, ivr, iv30, hv20 = 18.5, 50, 30, 25
     
-    return f"""请立即开始为 {symbol} 生成命令清单。
+    return f"""请立即开始为 {symbol} 生成双轨制命令清单。
 
 完成后，请提示用户下一步操作：
 "根据上述命令抓取数据后，请使用以下命令执行完整分析：
 
-analyze {symbol} -f <GEX Chart Dir> --cache symbol_datetime.json
+python app.py analyze -s {symbol} -f <数据文件夹路径> --vix {vix} --ivr {ivr} --iv30 {iv30} --hv20 {hv20}
 
 "
 """
