@@ -404,103 +404,139 @@ def quick(symbol: str, vix: float, folder: str, cache: str, output: str, va_url:
 # update 命令 - 增量更新
 # ============================================================
 
-@cli.command()
+# ============================================================
+# quick 命令 - 快速分析（自动从 VA API 获取参数）
+# 工作流标识: Meso → Micro
+# ============================================================
+
+@cli.command(name='quick')
 @click.argument('symbol')
-@click.option('-f', '--folder', required=True, type=click.Path(exists=True), help='数据文件夹路径')
-@click.option('-c', '--cache', required=True, help='缓存文件名')
+@click.option('-v', '--vix', type=float, required=True, help='VIX 指数（必需）')
+@click.option('-t', '--target-date', 'target_date', help='目标日期 (YYYY-MM-DD)，获取指定日期的数据')
+@click.option('-f', '--folder', type=click.Path(exists=True), help='数据文件夹路径')
+@click.option('-c', '--cache', help='缓存文件名')
 @click.option('-o', '--output', type=click.Path(), help='输出文件路径')
+@click.option('--va-url', default='http://localhost:8668', help='VA API 服务地址')
 @click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
-def update(symbol: str, folder: str, cache: str, output: str, model_config: str):
-    """
-    增量更新命令
+def quick(symbol: str, vix: float, target_date: str, folder: str, cache: str, output: str, va_url: str, model_config: str):
+    from utils.va_client import VAClient, VAClientError
     
-    在现有分析基础上补齐缺失字段，保留历史数据。
-    
-    \b
-    示例:
-      update NVDA -f ./data/images --cache NVDA_20251206.json
-    """
     setup_logging()
     symbol = symbol.upper()
     
-    console.print(f"\n[bold cyan]🔄 Swing Quant - 增量更新 {symbol}[/bold cyan]")
+    # 验证日期格式
+    if target_date:
+        import re
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', target_date):
+            console.print(f"[red]❌ 日期格式错误: {target_date}[/red]")
+            console.print("[yellow]💡 请使用 YYYY-MM-DD 格式，例如: 2025-12-06[/yellow]")
+            sys.exit(1)
     
-    # 加载配置和缓存
+    # 输出工作流标识
+    console.print(f"\n[bold magenta]═══════════════════════════════════════[/bold magenta]")
+    console.print(f"[bold magenta]       Meso → Micro 分析工作流        [/bold magenta]")
+    console.print(f"[bold magenta]═══════════════════════════════════════[/bold magenta]")
+    
+    console.print(f"\n[bold cyan]🚀 Swing Quant - 快速分析 {symbol}[/bold cyan]")
+    console.print(f"[dim]VA API: {va_url}[/dim]")
+    if target_date:
+        console.print(f"[dim]目标日期: {target_date}[/dim]")
+    
+    # 1. 从 VA API 获取参数
+    date_hint = f" ({target_date})" if target_date else ""
+    console.print(f"\n[yellow]📡 正在从 VA API 获取 {symbol} 的市场参数{date_hint}...[/yellow]")
+    
+    client = VAClient(base_url=va_url)
+    
+    try:
+        api_params = client.get_params(symbol, vix=vix, date=target_date)
+        
+        # 验证必要参数
+        missing = [k for k in ['ivr', 'iv30', 'hv20'] if api_params.get(k) is None]
+        if missing:
+            console.print(f"[red]❌ VA API 返回的数据缺少必要字段: {missing}[/red]")
+            sys.exit(1)
+        
+        # 构建完整参数
+        params = {
+            'vix': vix,
+            'ivr': api_params['ivr'],
+            'iv30': api_params['iv30'],
+            'hv20': api_params['hv20'],
+        }
+        
+        if api_params.get('earning_date'):
+            params['earning_date'] = api_params['earning_date']
+        
+        console.print(f"[green]✅ 参数获取成功[/green]")
+        console.print(f"[dim]   VIX={params['vix']}, IVR={params['ivr']}, IV30={params['iv30']}, HV20={params['hv20']}[/dim]")
+        console.print(f"[dim]   VRP={params['iv30']/params['hv20']:.2f}[/dim]")
+        if params.get('earning_date'):
+            console.print(f"[dim]   财报日期={params['earning_date']}[/dim]")
+        
+    except VAClientError as e:
+        console.print(f"[red]❌ VA API 调用失败: {e}[/red]")
+        
+        # 如果指定了日期但数据不存在，尝试获取可用日期
+        if target_date:
+            try:
+                available_dates = client.list_symbol_dates(symbol)
+                if available_dates:
+                    console.print(f"[yellow]💡 {symbol} 可用的日期:[/yellow]")
+                    for d in available_dates[:5]:
+                        console.print(f"[dim]   {d}[/dim]")
+                    if len(available_dates) > 5:
+                        console.print(f"[dim]   ... 共 {len(available_dates)} 个日期[/dim]")
+            except:
+                pass
+        
+        console.print("[yellow]💡 请确保 volatility_analysis 服务正在运行:[/yellow]")
+        console.print("[dim]   cd volatility_analysis && python app.py[/dim]")
+        sys.exit(1)
+    
+    # 2. 验证参数
+    params = validate_market_params(params)
+    
+    # 3. 加载模型配置
     model_client = ModelClientFactory.create_from_config(model_config)
-    env_vars = {'config': config}
+    env_vars = {
+        'config': config,
+        'market_params': params,
+        'tag': 'Meso'  # 添加工作流标识
+    }
     
-    cached = load_cache_params(symbol, cache)
-    env_vars['market_params'] = cached['market_params']
-    env_vars['dyn_params'] = cached['dyn_params']
+    # 4. 判断模式并执行
+    if not folder:
+        # 模式1: 生成命令清单
+        mode = 'full'
+    else:
+        # 模式2: 完整分析
+        if not cache:
+            console.print("[red]❌ 完整分析需要指定缓存文件[/red]")
+            console.print(f"[yellow]💡 示例: quick {symbol} -v {vix} -f {folder} -c {symbol}_20251206.json[/yellow]")
+            sys.exit(1)
+        
+        # 从缓存加载动态参数
+        cached = load_cache_params(symbol, cache)
+        env_vars['dyn_params'] = cached['dyn_params']
+        
+        console.print(f"[green]✅ 从缓存加载动态参数[/green]")
+        console.print(f"[dim]   场景={cached['dyn_params'].get('scenario')}[/dim]")
+        
+        mode = 'full'
     
-    mp = cached['market_params']
-    dp = cached['dyn_params']
-    console.print(f"[green]✅ 从缓存加载参数[/green]")
-    console.print(f"[dim]   VIX={mp.get('vix')}, IVR={mp.get('ivr')}, 场景={dp.get('scenario')}[/dim]")
-    
-    # 执行命令
+    # 5. 执行分析
     command = AnalyzeCommand(console, model_client, env_vars)
     try:
         command.execute(
             symbol=symbol,
             folder=folder,
             output=output,
-            mode='update',  # 关键：使用 update 模式
+            mode=mode,
             cache=cache,
-            market_params=env_vars['market_params'],
-            dyn_params=env_vars['dyn_params']
-        )
-    except KeyboardInterrupt:
-        console.print("\n[yellow]⚠️ 用户中断[/yellow]")
-        sys.exit(0)
-
-
-# ============================================================
-# refresh 命令 - 刷新快照
-# ============================================================
-
-@cli.command()
-@click.argument('symbol')
-@click.option('-f', '--folder', required=True, type=click.Path(exists=True), help='数据文件夹路径')
-@click.option('-c', '--cache', required=True, help='缓存文件名')
-@click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
-def refresh(symbol: str, folder: str, cache: str, model_config: str):
-    """
-    刷新快照命令
-    
-    盘中快速刷新 Greeks 数据，生成新快照。
-    
-    \b
-    示例:
-      refresh NVDA -f ./data/images --cache NVDA_20251206.json
-    """
-    setup_logging()
-    symbol = symbol.upper()
-    
-    console.print(f"\n[bold cyan]📸 Swing Quant - 刷新快照 {symbol}[/bold cyan]")
-    
-    # 加载配置和缓存
-    model_client = ModelClientFactory.create_from_config(model_config)
-    env_vars = {'config': config}
-    
-    cached = load_cache_params(symbol, cache)
-    env_vars['market_params'] = cached['market_params']
-    env_vars['dyn_params'] = cached['dyn_params']
-    
-    mp = cached['market_params']
-    dp = cached['dyn_params']
-    console.print(f"[green]✅ 从缓存加载参数[/green]")
-    console.print(f"[dim]   VIX={mp.get('vix')}, IVR={mp.get('ivr')}, 场景={dp.get('scenario')}[/dim]")
-    
-    # 执行命令
-    command = RefreshCommand(console, model_client, env_vars)
-    try:
-        command.execute(
-            symbol=symbol,
-            folder=folder,
-            cache=cache,
-            market_params=env_vars['market_params'],
-            dyn_params=env_vars['dyn_params']
+            market_params=env_vars.get('market_params'),
+            dyn_params=env_vars.get('dyn_params'),
+            tag=env_vars.get('tag')  # 传递 tag 参数
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]⚠️ 用户中断[/yellow]")

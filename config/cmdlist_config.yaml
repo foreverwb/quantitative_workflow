@@ -1,0 +1,197 @@
+# ============================================================
+# 命令清单配置文件
+# 用于配置 code2_cmdlist.py 生成的数据抓取命令
+# 
+# 修改说明：
+# 1. 新增命令：在对应分组下添加新条目
+# 2. 删除命令：将 enabled 设为 false 或直接删除条目
+# 3. 修改命令：编辑 template 字段
+# 4. 调整顺序：修改 order 值（数值小的排在前面）
+#
+# 可用变量：
+# - {symbol}    : 股票代码 (如 NVDA)
+# - {strikes}   : Strike 范围 (如 30)
+# - {dte_short} : 短期 DTE (如 14w)
+# - {dte_mid}   : 中期 DTE (如 30w)
+# - {dte_long}  : 长期 DTE (如 60m)
+# - {window}    : 窗口大小 (如 60)
+# ============================================================
+
+version: "1.0"
+
+# 命令分组定义
+groups:
+  core_structure:
+    name: "核心结构"
+    description: "Walls & Clusters - 双轨制"
+    
+  flows:
+    name: "供需流向"
+    description: "Flows - 结构性提纯"
+    
+  volatility:
+    name: "波动率锚点"
+    description: "Volatility Anchors"
+    
+  iv_path:
+    name: "IV Path & Validation"
+    description: "IV 趋势确认"
+    
+  extended:
+    name: "扩展命令"
+    description: "条件触发的备份命令"
+    
+  index_background:
+    name: "指数背景"
+    description: "SPX & QQQ 背景数据"
+
+# 命令模板列表
+commands:
+  # ========== 核心结构 ==========
+  - group: core_structure
+    description: "[战术视图] 捕捉近端摩擦与周度博弈 (Weekly Friction)"
+    template: "!gexr {symbol} {strikes} {dte_short} w"
+    order: 1
+    enabled: true
+    
+  - group: core_structure
+    description: "[战略视图] 锁定机构核心仓位与磁力目标 (Monthly Structure)"
+    template: "!gexr {symbol} {strikes} {dte_mid} m"
+    order: 2
+    enabled: true
+
+  # ========== 供需流向 ==========
+  - group: flows
+    description: "净Gamma与触发线 (全周期)"
+    template: "!gexn {symbol} {window} 98"
+    order: 10
+    enabled: true
+    
+  - group: flows
+    description: "Trigger Line"
+    template: "!trigger {symbol} {window}"
+    order: 11
+    enabled: true
+    
+  - group: flows
+    description: "Vanna Exposure (使用 m 过滤，聚焦长期持仓对冲压力)"
+    template: "!vanna {symbol} ntm {window} m"
+    order: 12
+    enabled: true
+    
+  - group: flows
+    description: "Delta Exposure (与中期结构对齐)"
+    template: "!dexn {symbol} {strikes} {dte_mid}"
+    order: 13
+    enabled: true
+
+  # ========== 波动率锚点 ==========
+  - group: volatility
+    description: "[物理锚点] 7日 Skew (用于 Raw_EM1$)"
+    template: "!skew {symbol} ivmid atm 7"
+    order: 20
+    enabled: true
+    
+  - group: volatility
+    description: "[物理锚点] 14日 Skew"
+    template: "!skew {symbol} ivmid atm 14"
+    order: 21
+    enabled: true
+    
+  - group: volatility
+    description: "[定价基准] 30日 Skew (Monthly 公允价值)"
+    template: "!skew {symbol} ivmid atm 30 m"
+    order: 22
+    enabled: true
+    
+  - group: volatility
+    description: "Term Structure"
+    template: "!term {symbol} 60"
+    order: 23
+    enabled: true
+
+  # ========== IV Path & Validation ==========
+  - group: iv_path
+    description: "确认 IV 趋势"
+    template: "v_path: {symbol} 7D ATM-IV 对比 3 日 skew 数据"
+    order: 30
+    enabled: true
+    
+  - group: iv_path
+    description: "[真实意图] 确认今日资金流向 (用于证伪)"
+    template: "!volumen {symbol} {strikes} {dte_short}"
+    order: 31
+    enabled: true
+    
+  - group: iv_path
+    description: "[波动率底牌] Dealer Vega 敞口"
+    template: "!vexn {symbol} {strikes} {dte_mid}"
+    order: 32
+    enabled: true
+
+  # ========== 扩展命令 ==========
+  - group: extended
+    description: "长期备份 (如果 dyn_dte_mid 已是月度)"
+    template: "!gexr {symbol} {strikes} {dte_long}"
+    order: 40
+    enabled: true
+    # condition: "scenario != 'Grind'"  # 可选条件
+
+  # ========== 指数背景 - SPX ==========
+  - group: index_background
+    description: "SPX 净Gamma"
+    template: "!gexn SPX {window} 98"
+    order: 50
+    enabled: true
+    
+  - group: index_background
+    description: "SPX 7日 Skew"
+    template: "!skew SPX ivmid atm 7"
+    order: 51
+    enabled: true
+    
+  - group: index_background
+    description: "SPX 14日 Skew"
+    template: "!skew SPX ivmid atm 14"
+    order: 52
+    enabled: true
+
+  # ========== 指数背景 - QQQ ==========
+  - group: index_background
+    description: "QQQ 净Gamma (Big Tech)"
+    template: "!gexn QQQ {window} 98"
+    order: 53
+    enabled: true
+    
+  - group: index_background
+    description: "QQQ 7日 Skew"
+    template: "!skew QQQ ivmid atm 7"
+    order: 54
+    enabled: true
+    
+  - group: index_background
+    description: "QQQ 14日 Skew"
+    template: "!skew QQQ ivmid atm 14"
+    order: 55
+    enabled: true
+
+# ============================================================
+# 扩展示例（注释状态，按需启用）
+# ============================================================
+
+# 以下是可以按需添加的额外命令示例：
+
+# 期权链深度分析
+#   - group: extended
+#     description: "OI Concentration"
+#     template: "!oiconc {symbol} {dte_mid}"
+#     order: 100
+#     enabled: false
+
+# 特定场景命令
+#   - group: extended
+#     description: "财报前 IV 监控"
+#     template: "!iv_monitor {symbol} 7"
+#     order: 101
+#     enabled: false
+#     condition: "scenario == 'Earnings'"

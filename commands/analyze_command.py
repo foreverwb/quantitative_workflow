@@ -13,6 +13,7 @@ import prompts
 from commands.base import BaseCommand
 from core.workflow import AgentExecutor, CacheManager
 from code_nodes.pre_calculator import MarketStateCalculator
+from code_nodes.code0_cmdlist import CommandListGenerator
 from utils.console_printer import print_error_summary
 
 
@@ -120,7 +121,7 @@ class AnalyzeCommand(BaseCommand):
     
     def _generate_command_list(self, symbol: str, pre_calc: Dict, tag: str = None) -> Dict[str, Any]:
         """
-        生成命令清单（Agent2）
+        生成命令清单（Code Node 实现，替代原 Agent2）
         
         Args:
             symbol: 股票代码
@@ -136,31 +137,12 @@ class AnalyzeCommand(BaseCommand):
         
         self.console.print("\n[yellow]📁 加载配置...[/yellow]")
         
-        # 创建 Agent Executor
-        agent_executor = AgentExecutor(
-            self.model_client,
-            self.env_vars,
-            enable_pretty_print=False
-        )
+        # 获取市场参数
+        market_params = self.env_vars.get('market_params', {})
         
         self.console.print(f"\n[green]🚀 开始生成 {symbol.upper()} 的动态命令清单[/green]\n")
         
         try:
-            from prompts.agent2_cmdlist import get_system_prompt, get_user_prompt
-            sys_prompt = get_system_prompt(symbol=symbol.upper(), pre_calc=pre_calc)
-            user_prompt = get_user_prompt(symbol=symbol.upper())
-            market_params = self.env_vars.get('market_params', {})
-            messages = [
-                {
-                    "role": "system",
-                    "content": sys_prompt
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt
-                }
-            ]
-            
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -168,17 +150,21 @@ class AnalyzeCommand(BaseCommand):
             ) as progress:
                 task = progress.add_task("正在生成命令清单...", total=None)
                 
-                response = agent_executor.execute_agent(
-                    agent_name="agent2",
-                    messages=messages,
-                    description=f"为 {symbol.upper()} 生成动态命令清单"
+                # 使用 Code Node 替代 Agent 调用
+                generator = CommandListGenerator()
+                result = generator.generate(
+                    symbol=symbol.upper(),
+                    pre_calc=pre_calc,
+                    market_params=market_params
                 )
                 
                 progress.update(task, completed=True)
             
-            content = response.get("content", "")
+            content = result.get("content", "")
+            summary = result.get("summary", {})
             
             self.console.print("\n[green]✅ 动态命令清单生成完成![/green]\n")
+            self.console.print(f"[dim]   共生成 {summary.get('total_commands', 0)} 条命令[/dim]")
             self.console.print(Panel(
                 content,
                 title=f"📋 {symbol.upper()} 数据抓取命令清单 (基于 {pre_calc['scenario']})",
@@ -213,7 +199,7 @@ class AnalyzeCommand(BaseCommand):
                     )
                 else:
                     self.console.print(
-                        f"[cyan]   python app.py analyze -s {symbol.upper()} "
+                        f"[cyan]   python app.py analyze {symbol.upper()} "
                         f"-f <数据文件夹路径> "
                         f"--cache {cache_filename}[/cyan]"
                     )
@@ -225,7 +211,8 @@ class AnalyzeCommand(BaseCommand):
                 "content": content, 
                 "pre_calc": pre_calc,
                 "cache_path": str(cache_path) if cache_path else None,
-                "tag": tag
+                "tag": tag,
+                "summary": summary  # 新增：命令统计
             }
         
         except Exception as e:

@@ -6,6 +6,8 @@ from .code5_report_html import main as html_report_main
 from .code_aggregator import main as aggregator_main
 from .field_calculator import main as calculator_main
 from .pre_calculator import MarketStateCalculator
+from .code0_cmdlist import main as cmdlist_main
+from .code0_cmdlist import CommandListGenerator, CommandGroup, generate_command_list
 
 __all__ = [
     'event_detection_main',
@@ -15,5 +17,9 @@ __all__ = [
     'html_report_main',
     'aggregator_main',
     'calculator_main',
-    'MarketStateCalculator'
+    'MarketStateCalculator',
+    'cmdlist_main',
+    'CommandListGenerator',
+    'CommandGroup',
+    'generate_command_list',
 ]

@@ -80,13 +80,14 @@ class VAClient:
         except Exception as e:
             raise VAClientError(f"请求异常: {str(e)}")
     
-    def get_params(self, symbol: str, vix: float = None) -> Dict[str, Any]:
+    def get_params(self, symbol: str, vix: float = None, date: str = None) -> Dict[str, Any]:
         """
         获取单个 symbol 的市场参数
         
         Args:
             symbol: 股票代码
             vix: VIX 指数（可选，如果不提供需要后续指定）
+            date: 目标日期，格式 YYYY-MM-DD（可选，默认返回最新记录）
             
         Returns:
             市场参数字典，包含:
@@ -102,6 +103,8 @@ class VAClient:
         params = {}
         if vix is not None:
             params['vix'] = vix
+        if date is not None:
+            params['date'] = date
         
         data = self._make_request(
             'GET', 
@@ -117,7 +120,8 @@ class VAClient:
     def get_params_batch(
         self, 
         symbols: List[str], 
-        vix: float = None
+        vix: float = None,
+        date: str = None
     ) -> Dict[str, Dict[str, Any]]:
         """
         批量获取多个 symbol 的市场参数
@@ -125,6 +129,7 @@ class VAClient:
         Args:
             symbols: 股票代码列表
             vix: VIX 指数（所有 symbol 共用）
+            date: 目标日期，格式 YYYY-MM-DD（可选）
             
         Returns:
             字典，key 为 symbol，value 为参数字典
@@ -132,10 +137,16 @@ class VAClient:
         Raises:
             VAClientError: 获取失败时抛出
         """
+        payload = {'symbols': symbols}
+        if vix is not None:
+            payload['vix'] = vix
+        if date is not None:
+            payload['date'] = date
+        
         data = self._make_request(
             'POST',
             '/api/swing/params/batch',
-            json={'symbols': symbols, 'vix': vix}
+            json=payload
         )
         
         if not data.get('success'):
@@ -157,6 +168,19 @@ class VAClient:
         """
         data = self._make_request('GET', '/api/swing/symbols')
         return data.get('symbols', [])
+    
+    def list_symbol_dates(self, symbol: str) -> List[str]:
+        """
+        获取指定 symbol 的所有可用日期
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            日期列表（降序排列）
+        """
+        data = self._make_request('GET', f'/api/swing/dates/{symbol.upper()}')
+        return data.get('dates', [])
     
     def is_available(self) -> bool:
         """
@@ -192,18 +216,19 @@ def get_default_client() -> VAClient:
     return _default_client
 
 
-def fetch_market_params(symbol: str, vix: float = None) -> Dict[str, Any]:
+def fetch_market_params(symbol: str, vix: float = None, date: str = None) -> Dict[str, Any]:
     """
     便捷函数：获取市场参数
     
     Args:
         symbol: 股票代码
         vix: VIX 指数
+        date: 目标日期 (YYYY-MM-DD)
         
     Returns:
         市场参数字典
     """
-    return get_default_client().get_params(symbol, vix)
+    return get_default_client().get_params(symbol, vix, date)
 
 
 def is_va_service_running() -> bool:
