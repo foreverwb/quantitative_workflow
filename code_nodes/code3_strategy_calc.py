@@ -4,16 +4,16 @@ Code 3: 策略计算引擎 (Swing 增强版 v2.2)
 1. [夯实] 强制 R > 1.8 逻辑：Debit 策略优先，Credit 策略需深度虚值。
 """
 import json
-import math
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
-from utils.config_loader import config  # 单例配置
+from utils.config_loader import config 
+import traceback
+from loguru import logger
 
 @dataclass
 class ValidationFlags:
     is_vetoed: bool = False
     veto_reason: str = ""
-    # [变更] 移除 zero_dte_ratio，改为 weekly_friction
     weekly_friction_state: str = "Clear" # Clear / Obstructed
     execution_guidance: str = ""
     strategy_bias: str = "Neutral"
@@ -224,6 +224,7 @@ class StrategyCalculator:
 
     def _calc_pw_credit(self, cluster: float, gap_em1: float, tech_score: float, iv: float, dte: int) -> WinProbResult:
         c = self.conf.pw_calculation.credit
+        print("_calc_pw_credit", c)
         base = c.base
         c_adj = c.cluster_coef * (cluster or 1.0)
         d_pen = c.distance_penalty_coef * (gap_em1 or 2.0)
@@ -353,9 +354,15 @@ def main(agent3_output: dict, agent5_output: dict, technical_score: float = 0, *
         return calculator.process(agent3_output, agent5_output, technical_score)
         
     except Exception as e:
-        import traceback
+        full_trace = traceback.format_exc()
+        
+        logger.error(f"❌ Strategy_calc error: {e}")
+        logger.error(full_trace)
+        
         return {
             "error": True,
-            "message": str(e),
-            "traceback": traceback.format_exc()
+            "error_message": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc(),
+            "trace": full_trace
         }

@@ -11,6 +11,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from loguru import logger
+import traceback
 
 def markdown_to_html(text: str) -> str:
     """
@@ -430,7 +431,11 @@ def main(
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(full_html)
                 
-            return {"status": "success", "html_path": str(save_path)}
+            return {
+                "status": "success", 
+                "html_path": str(save_path),
+                "mode": "dashboard"
+            }
             
         else:
             # 初始报告模式
@@ -455,10 +460,19 @@ def main(
                 with open(save_path, 'w', encoding='utf-8') as f:
                     f.write(full_html)
                     
-                return {"status": "success", "html_path": str(save_path)}
+                return {"status": "success", "html_path": str(save_path), "mode": "report"}
             else:
                 return {"status": "error", "message": "Missing markdown content for report"}
             
     except Exception as e:
         logger.error(f"HTML 生成失败: {e}")
-        return {"status": "error", "message": str(e)}
+        
+        logger.error(f"❌ HTML generation failed for {symbol}")
+        logger.error(f"Error: {e}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
+        
+        return {
+            "status": "error", 
+            "message": str(e),
+            "traceback": traceback.format_exc()
+        }

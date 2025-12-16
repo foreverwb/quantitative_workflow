@@ -1,0 +1,349 @@
+# ============================================================
+# RuntimeLabel 配置文件 v3
+# 基于 code0_cmdlist.py 的命令定义
+# ============================================================
+
+version: "3.0"
+
+# ============================================================
+# 指数符号列表
+# ============================================================
+index_symbols:
+  - SPX
+  - QQQ
+  - IWM
+  - DIA
+
+# ============================================================
+# 命令 → RuntimeLabel 映射配置
+# ============================================================
+commands:
+
+  # 1️⃣ !dexn {symbol} {strikes} {dte_mid} w
+  dexn:
+    cmd: dexn
+    timeframe_role: tactical
+    structure_role: flow_confirmation
+    params_mapping:
+      STRIKES: strikes
+      DTE: dte
+      EXPIRATION_FILTER: w
+    param_hints:
+      DTE_RANGE: mid
+      PARAM_SOURCE: runtime_generated
+    field_policy:
+      allowed_fields:
+        - dex_same_dir_pct
+      forbidden_fields:
+        - walls
+        - gamma_metrics
+        - indices
+    extract_fields:
+      - dex_same_dir_pct
+
+  # 2️⃣ !gexn {symbol} {window} 98
+  gexn:
+    cmd: gexn
+    timeframe_role: strategic
+    structure_role: core_wall
+    params_mapping:
+      WINDOW: window
+      DTE: 98
+    param_hints:
+      DTE_RANGE: long
+      PARAM_SOURCE: runtime_generated
+    field_policy:
+      allowed_fields:
+        - net_gex
+        - vol_trigger
+      forbidden_fields:
+        - nearby_peak
+        - next_cluster_peak
+    extract_fields:
+      - net_gex
+      - vol_trigger
+
+  gexn_index:
+    cmd: gexn
+    index_context: true
+    symbol_policy:
+      mode: fixed
+      allowed: [SPX, QQQ]
+    timeframe_role: background
+    structure_role: regime_anchor
+    params_mapping:
+      WINDOW: window
+      STRIKE_RANGE: 98
+    param_hints:
+      AS_INDEX: true
+      NOT_PRIMARY_TARGET: true
+      PARAM_SOURCE: runtime_generated
+    write_target:
+      root: indices
+    field_policy:
+      allowed_fields:
+        - net_gex_idx
+        - spot_price_idx
+        - iv_7d
+        - iv_14d
+      forbidden_fields:
+        - targets
+        - targets.*
+    extract_fields:
+      - net_gex_idx
+      - spot_price_idx
+      - iv_7d
+      - iv_14d
+
+  # 4️⃣ !gexr {symbol} {strikes} {dte} {w|m}
+  gexr:
+    cmd: gexr
+    timeframe_role: structure
+    structure_role: gamma_structure
+    params_mapping:
+      STRIKES: strikes
+      DTE: dte
+      EXPIRATION_FILTER: filter
+    param_hints:
+      PARAM_SOURCE: runtime_generated
+    aggregation_role:
+      participates_in:
+        - wall_detection
+        - cluster_strength
+        - cluster_ratio
+    field_policy:
+      allowed_fields:
+        - spot_price
+        - walls.call_wall
+        - walls.put_wall
+        - peaks[].price
+        - peaks[].abs_gex
+      forbidden_fields:
+        - net_gex
+        - gap_distance_dollar
+        - cluster_strength_ratio
+    extract_fields:
+      - spot_price
+      - call_wall
+      - put_wall
+      - abs_gex_peaks
+
+  # 5️⃣ !skew {symbol} ivmid atm {dte}
+  skew:
+    cmd: skew
+    timeframe_role: volatility
+    structure_role: volatility
+    params_mapping:
+      ATM: true
+      DTE: dte
+    param_hints:
+      PARAM_SOURCE: runtime_generated
+    aggregation_role:
+      participates_in:
+        - iv_path
+      aggregation_key:
+        - SYMBOL
+        - CMD
+        - PARAMS.ATM
+        - PARAMS.DTE
+    field_policy:
+      allowed_fields:
+        - atm_iv.iv_7d
+      forbidden_fields:
+        - walls
+        - gamma_metrics
+        - iv_path
+    extract_fields:
+      - atm_iv.iv_7d
+
+  # 6️⃣ !skew SPX/QQQ ivmid atm {dte} (指数)
+  skew_index:
+    cmd: skew
+    timeframe_role: context
+    structure_role: index_volatility
+    params_mapping:
+      ATM: true
+      DTE: dte
+    param_hints:
+      PARAM_SOURCE: runtime_generated
+    field_policy:
+      allowed_fields:
+        - indices.iv_7d
+        - indices.iv_14d
+      forbidden_fields:
+        - gamma_metrics
+        - walls
+    extract_fields:
+      - indices.iv_7d
+      - indices.iv_14d
+
+  # 7️⃣ !trigger {symbol} {window}
+  trigger:
+    cmd: trigger
+    timeframe_role: strategic
+    structure_role: core_wall
+    params_mapping:
+      WINDOW: window
+    param_hints:
+      PARAM_SOURCE: runtime_generated
+    field_policy:
+      allowed_fields:
+        - vol_trigger
+      forbidden_fields:
+        - nearby_peak
+    extract_fields:
+      - vol_trigger
+
+  # 8️⃣ !vanna {symbol} ntm {window} m
+  vanna:
+    cmd: vanna
+    timeframe_role: directional
+    structure_role: flow_strength
+    params_mapping:
+      MONEYNESS: ntm
+      WINDOW: window
+      UNIT: m
+    param_hints:
+      WINDOW_RANGE: mid_to_long
+      PARAM_SOURCE: runtime_generated
+    field_policy:
+      allowed_fields:
+        - vanna_dir
+        - vanna_confidence
+      forbidden_fields:
+        - walls
+        - gamma_metrics
+        - cluster_strength
+        - spot_price
+    extract_fields:
+      - vanna_dir
+      - vanna_confidence
+    confidence_source:
+      type: rule_based
+      allowed_signals:
+        - explicit_text
+        - numeric_exposure
+        - percentile_text
+      forbidden_signals:
+        - bar_height
+        - color_only
+        - visual_emphasis_only
+
+  # 9️⃣ !vexn {symbol} {strikes} {dte_mid} w
+  vexn:
+    cmd: vexn
+    timeframe_role: validation
+    structure_role: dealer_risk
+    params_mapping:
+      STRIKES: strikes
+      DTE: dte
+      EXPIRATION_FILTER: w
+    param_hints:
+      DTE_RANGE: mid
+      PARAM_SOURCE: runtime_generated
+    field_policy:
+      allowed_fields:
+        - validation_metrics.net_vega_exposure
+      forbidden_fields:
+        - walls
+        - gamma_metrics
+        - peaks
+    extract_fields:
+      - net_vega_exposure
+
+  # 🔟 !volumen {symbol} {strikes} {dte_short} w
+  volumen:
+    cmd: volumen
+    timeframe_role: validation
+    structure_role: flow_confirmation
+    params_mapping:
+      STRIKES: strikes
+      DTE: dte
+      EXPIRATION_FILTER: w
+    param_hints:
+      DTE_RANGE: short
+      PARAM_SOURCE: runtime_generated
+    field_policy:
+      allowed_fields:
+        - validation_metrics.net_volume_signal
+      forbidden_fields:
+        - gamma_metrics
+        - walls
+        - peaks
+    extract_fields:
+      - net_volume_signal
+
+  # 1️⃣1️⃣ {symbol}_iv_path_{datetime}
+  iv_path_image:
+    cmd: skew
+    timeframe_role: volatility
+    structure_role: volatility
+    params_mapping:
+      ATM: true
+      DTE: 7
+    param_hints:
+      PARAM_SOURCE: runtime_generated
+    aggregation_role:
+      participates_in:
+        - iv_path
+      aggregation_key:
+        - SYMBOL
+        - CMD
+        - PARAMS.ATM
+        - PARAMS.DTE
+    field_policy:
+      allowed_fields:
+        - atm_iv.iv_7d
+      forbidden_fields:
+        - gamma_metrics
+        - walls
+        - iv_path
+    extract_fields:
+      - atm_iv.iv_7d
+
+# ============================================================
+# 聚合规则配置
+# ============================================================
+aggregation_rules:
+  iv_path:
+    name: iv_path
+    input_source:
+      cmd: skew
+      field: atm_iv_7d
+      require_timestamp: true
+    window:
+      size: 3
+      order: desc
+    decision_rule:
+      - condition: "delta >= +0.01"
+        result: "升"
+      - condition: "delta <= -0.01"
+        result: "降"
+      - condition: "else"
+        result: "平"
+    confidence_rule:
+      high: "T,T-1,T-2 same direction"
+      medium: "T,T-1 exist"
+      low: "only one delta"
+      na: "数据不足"
+
+# ============================================================
+# DTE 范围定义（用于区分 short/mid）
+# ============================================================
+dte_ranges:
+  short_max: 21    # DTE <= 21 视为 short
+  mid_max: 45      # 21 < DTE <= 45 视为 mid
+  long_min: 46     # DTE > 45 视为 long
+
+# ============================================================
+# 默认 Label
+# ============================================================
+default_label:
+  timeframe_role: tactical
+  structure_role: null
+  param_hints:
+    PARAM_SOURCE: unknown
+  field_policy:
+    allowed_fields: []
+    forbidden_fields: []
+  extract_fields: []

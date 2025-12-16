@@ -464,6 +464,8 @@ class ModelClientManager:
         Returns:
             响应字典
         """
+        print('>>>>>>>> temperature <<<<<<<<<', temperature)
+        print("-=--=--= kwargs =-=-=-=--=-", kwargs)
         client = self.get_client(agent_name)
         
         logger.info(f"[{agent_name}] 调用 Responses API: {client.provider}/{client.model}")

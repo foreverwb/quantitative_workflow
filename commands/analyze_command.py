@@ -333,11 +333,6 @@ class AnalyzeCommand(BaseCommand):
         
         elif status == "success":
             self.console.print("\n[green]✅ 分析完成![/green]\n")
-            self.console.print(Panel(
-                result.get("report", ""),
-                title="📊 分析报告",
-                border_style="green"
-            ))
             
             # 保存报告
             if output:

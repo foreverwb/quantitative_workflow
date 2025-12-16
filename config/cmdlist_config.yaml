@@ -50,13 +50,13 @@ commands:
   # ========== 核心结构 ==========
   - group: core_structure
     description: "[战术视图] 捕捉近端摩擦与周度博弈 (Weekly Friction)"
-    template: "!gexr {symbol} {strikes} {dte_short} w"
+    template: "!gexr {symbol} {strikes} {dte_short}"
     order: 1
     enabled: true
     
   - group: core_structure
     description: "[战略视图] 锁定机构核心仓位与磁力目标 (Monthly Structure)"
-    template: "!gexr {symbol} {strikes} {dte_mid} m"
+    template: "!gexr {symbol} {strikes} {dte_mid}"
     order: 2
     enabled: true
 

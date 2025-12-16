@@ -6,7 +6,7 @@
 # === 默认模型配置（全局） ===
 default:
   provider: openai               # 默认提供商
-  model: deepseek-v3.2-speciale                 # 默认模型                # 从环境变量 DMXAPI_KEY 读取
+  model: DeepSeek-V3.2-Thinking                 # 默认模型                # 从环境变量 DMXAPI_KEY 读取
   base_url: "https://www.dmxapi.cn/v1"
   temperature: 0.3
   max_tokens: 4096
@@ -16,46 +16,42 @@ default:
 # 每个 Agent 可以覆盖默认配置，使用不同的模型
 
 agents:
-  # Agent 2: 命令清单生成（简单任务，使用经济模型）
-  agent2:
-    provider: openai
-    model: Qwen3-8B        # 使用小模型节省成本
-    temperature: 0.3
-    max_tokens: 2048
-  
   # Agent 3: 数据校验（需要视觉能力）
   agent3:
     provider: openai
-    model: gpt-4o-2024-11-20    # 需要视觉支持 gpt-4.1-mini-2025-04-14  gpt-4.1-2025-04-14 gpt-4o-2024-11-20
-    temperature: 0.3
+    model: Qwen3-VL-235B-A22B-Instruct    # 需要视觉支持 gpt-4.1-mini-2025-04-14  gpt-4.1-2025-04-14 gpt-4o-2024-11-20
     max_tokens: 8192
+    temperature: 0
+    top_p: 1
+    presence_penalty: 0
+    frequency_penalty: 0
     supports_vision: true
   
   # Agent 5: 场景分析（复杂推理，使用高级模型）
   agent5:
     provider: openai
-    model: deepseek-v3.2-speciale # deepseek-v3.2-speciale
+    model: DeepSeek-V3.2-Thinking # DeepSeek-V3.2-Thinking
     temperature: 0.5
     max_tokens: 4096
   
   # Agent 6: 策略生成（高级推理）
   agent6:
     provider: openai
-    model: deepseek-v3.2-speciale
+    model: DeepSeek-V3.2-Thinking
     temperature: 0.5
     max_tokens: 4096
   
   # Agent 7: 策略排序
   agent7:
     provider: openai
-    model: deepseek-v3.2-speciale
+    model: DeepSeek-V3.2-Thinking
     temperature: 0.5
     max_tokens: 3072
   
   # Agent 8: 最终报告（需要优秀的写作能力）
   agent8:
     provider: openai
-    model: deepseek-v3.2-speciale  # Claude 写作能力优秀
+    model: DeepSeek-V3.2-Thinking 
     temperature: 0.5
     max_tokens: 4096
 

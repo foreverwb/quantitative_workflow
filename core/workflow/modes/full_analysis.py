@@ -10,6 +10,7 @@ from loguru import logger
 import prompts
 import schemas
 from code_nodes import aggregator_main, calculator_main
+from code_nodes.runtime_label_builder import RuntimeLabelBuilder
 from .base import BaseMode
 from ..pipeline import AnalysisPipeline
 from core.error_handler import ErrorHandler, WorkflowError, ErrorCategory, ErrorSeverity
@@ -126,12 +127,13 @@ class FullAnalysisMode(BaseMode):
     
     def _run_agent3(self, symbol: str, images: List[Path]) -> Dict[str, Any]:
         """
-        Agent3 数据校验（增强版）
+        Agent3 数据校验（增强版 + RuntimeLabel）
         
         新增功能：
         1. 详细记录请求和响应
         2. 自动规范化数据结构
         3. 修复常见格式问题
+        4. 为每张图片附加 RuntimeLabel（语义约束）
         
         Args:
             symbol: 股票代码
@@ -141,10 +143,11 @@ class FullAnalysisMode(BaseMode):
             规范化后的 Agent3 响应
         """
         
-        logger.info("🔄 [Agent3] 数据校验（增强版）")
+        logger.info("🔄 [Agent3] 数据校验（增强版 + RuntimeLabel）")
         
         # 创建处理器
         handler = Agent3Handler()
+        label_builder = RuntimeLabelBuilder()
         
         # 构建 Prompt
         system_content = prompts.agent3_validate.get_system_prompt(self.env_vars)
@@ -159,33 +162,68 @@ class FullAnalysisMode(BaseMode):
             {"role": "user", "content": user_prompt}
         ]
         
-        # 编码所有图片
+        # 编码所有图片 + 附加 RuntimeLabel
         valid_img_count = 0
+        label_count = 0
+        
         for path in images:
             b64_str = self.encode_image_to_base64(path)
-            if b64_str:
-                inputs.append({
-                    "role": "user",
-                    "content": [{"type": "image_url", "image_url": {"url": b64_str}}]
+            if not b64_str:
+                logger.warning(f"⚠️ 无法编码图片: {path.name}")
+                continue
+            
+            # 构建 RuntimeLabel
+            label = label_builder.build_label(path.name, symbol)
+            
+            # 构建消息内容（Label + Image 合并为一条消息）
+            content_parts = []
+            
+            if label:
+                # 添加 RuntimeLabel（JSON 格式）
+                label_json = label.to_json()
+                content_parts.append({
+                    "type": "text",
+                    "text": f"### RuntimeLabel\n```json\n{label_json}\n```"
                 })
-                valid_img_count += 1
+                label_count += 1
+                logger.debug(f"📎 附加 Label: {path.name} → CMD={label.CMD}, ROLE={label.TIMEFRAME_ROLE}")
+            else:
+                # 无法解析时提供基础说明
+                content_parts.append({
+                    "type": "text",
+                    "text": f"### 图片: {path.name}\n（未能解析 RuntimeLabel，请根据图表内容自行判断）"
+                })
+                logger.warning(f"⚠️ 无法生成 Label: {path.name}")
+            
+            # 添加图片
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": b64_str}
+            })
+            
+            # 添加到消息列表（一条消息包含 Label + Image）
+            inputs.append({
+                "role": "user",
+                "content": content_parts
+            })
+            valid_img_count += 1
         
         if valid_img_count == 0:
             logger.error("❌ 没有有效图片可处理")
             return {}
         
-        logger.info(f"📸 已编码 {valid_img_count} 张图片")
+        logger.info(f"📸 已编码 {valid_img_count} 张图片，附加 {label_count} 个 RuntimeLabel")
         
         # 记录请求
         handler.log_request(symbol, inputs, valid_img_count)
-        
         # 调用 API
         response = self.agent_executor.execute_vision_agent(
             agent_name="agent3",
             inputs=inputs,
             json_schema=schemas.agent3_schema.get_schema()
         )
-        print("---------------> Agent3 <-------------------", json.dumps(response))
+        print("------------> Agent3 source response <--------------", '\n',json.dumps(response, ensure_ascii=False))
+        logger.debug(f"Agent3 原始响应: {json.dumps(response, ensure_ascii=False)[:500]}...")
         
         # 解析响应
         raw_content = response.get("content", {})

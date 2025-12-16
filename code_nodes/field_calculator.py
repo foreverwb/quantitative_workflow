@@ -238,7 +238,7 @@ class FieldCalculator:
         return k_sys, k_idiosync
     
     def validate_raw_fields(self, data: Dict) -> Dict:
-        """验证原始字段完整性（27个，含 validation_metrics 4个）"""
+        """验证原始字段完整性（26个，含 validation_metrics 3个）"""
         targets = data.get('targets', {})
         
         if isinstance(targets, str):
@@ -259,7 +259,7 @@ class FieldCalculator:
         
         # 2. walls (4个)
         walls = targets.get('walls', {})
-        for field in ["call_wall", "put_wall", "major_wall", "major_wall_type"]:
+        for field in ["call_wall", "put_wall", "major_wall"]:
             if not self._is_valid_value(walls.get(field)):
                 missing_fields.append({"field": field, "path": f"walls.{field}"})
         
@@ -297,9 +297,9 @@ class FieldCalculator:
             if not self._is_valid_value(atm_iv.get(field)):
                 missing_fields.append({"field": field, "path": f"atm_iv.{field}"})
         
-        # 6. validation_metrics (4个) - 允许 null，但需要记录
+        # 6. validation_metrics (2个) - 允许 null，但需要记录
         validation_metrics = targets.get('validation_metrics', {})
-        validation_fields = ["zero_dte_ratio", "net_volume_signal", "net_vega_exposure", "net_theta_exposure"]
+        validation_fields = ["net_volume_signal", "net_vega_exposure"]
         validation_missing = []
         for field in validation_fields:
             value = validation_metrics.get(field)
@@ -312,7 +312,7 @@ class FieldCalculator:
         core_provided = core_required - len(missing_fields)
         
         # 含 validation_metrics 的总数
-        total_required = 27
+        total_required = 25
         total_missing = len(missing_fields) + len(validation_missing)
         total_provided = total_required - total_missing
         
@@ -330,7 +330,7 @@ class FieldCalculator:
             "provided": total_provided,
             "core_provided": core_provided,
             "completion_rate": int((core_provided / core_required) * 100),
-            "validation_rate": int(((4 - len(validation_missing)) / 4) * 100) if validation_metrics else 0,
+            "validation_rate": int(((3 - len(validation_missing)) / 3) * 100) if validation_metrics else 0,
             "sanity_passed": is_sane,
             "sanity_errors": sanity_errors
         }
@@ -782,21 +782,41 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         print(f"\n📊 验证结果:")
         print(f"  • 完成率: {validation['completion_rate']}%")
         print(f"  • 提供字段: {validation['provided']}/{validation['total_required']}")
-        print(f"  • 缺失字段: {len(validation['missing_fields'])}")
+        print(f"  • 核心缺失: {len(validation['missing_fields'])}")
+        print(f"  • 验证缺失: {len(validation.get('validation_missing', []))}")
+        
+        # 输出具体缺失的字段名称
+        if validation['missing_fields']:
+            print(f"\n❌ 核心缺失字段:")
+            for item in validation['missing_fields']:
+                field_name = item.get('field', 'unknown')
+                field_path = item.get('path', 'unknown')
+                reason = item.get('reason', '')
+                if reason:
+                    print(f"    • {field_path} ({reason})")
+                else:
+                    print(f"    • {field_path}")
+        
+        if validation.get('validation_missing'):
+            print(f"\n⚠️ 验证字段缺失:")
+            for item in validation['validation_missing']:
+                field_path = item.get('path', 'unknown')
+                severity = item.get('severity', 'unknown')
+                print(f"    • {field_path} [severity: {severity}]")
         
         if not validation["is_complete"]:
-            print(f"❌ 数据不完整，缺失 {len(validation['missing_fields'])} 个字段")
+            print(f"\n❌ 数据不完整，核心缺失 {len(validation['missing_fields'])} 个字段")
             
             result = {
                 "status": "incomplete",
                 "data_status": "awaiting_data",
                 "validation": validation,
                 "targets": data.get("targets"),
-                "symbol": symbol  # 修复：添加 symbol 字段
+                "symbol": symbol
             }
             return result
         
-        print(f"✅ 原始字段验证通过: {validation['provided']}/{validation['total_required']}")
+        print(f"\n✅ 原始字段验证通过: {validation['provided']}/{validation['total_required']}")
         
         # 计算衍生字段
         print("\n🔧 开始计算衍生字段...")
@@ -809,7 +829,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
             "status": "complete",
             "data_status": "ready",
             "validation": validation,
-            "symbol": symbol,  # 修复：添加 symbol 字段
+            "symbol": symbol,
             **calculated_data
         }
         return result
@@ -819,7 +839,7 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         print(f"\n❌ Calculator 执行异常:")
         print(traceback.format_exc())
         return {
-            "symbol": symbol,  # 修复：添加 symbol 字段
+            "symbol": symbol,
             "result": json.dumps({
                 "error": True,
                 "error_message": str(e),

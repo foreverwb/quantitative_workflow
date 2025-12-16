@@ -235,6 +235,21 @@ class ConfigLoader:
     def strikes(self) -> DotDict:
         """快捷访问 strikes 配置"""
         return self.get_section('strikes')
+    
+    @property
+    def pw_calculation(self) -> DotDict:
+        """快捷访问 strikes 配置"""
+        return self.get_section('pw_calculation')
+    
+    @property
+    def greeks(self) -> DotDict:
+        """快捷访问 greeks 配置"""
+        return self.get_section('greeks')
+    
+    @property
+    def exit_rules(self) -> DotDict:
+        """快捷访问 exit_rules 配置"""
+        return self.get_section('exit_rules')
 
 
 # ============================================

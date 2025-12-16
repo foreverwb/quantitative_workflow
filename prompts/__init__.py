@@ -4,7 +4,6 @@ Prompts - Agent 提示词模块
 """
 
 # 导入所有 Agent prompt 模块
-from . import agent2_cmdlist
 from . import agent5_scenario
 from . import agent6_strategy
 from . import agent7_comparison
@@ -12,7 +11,6 @@ from . import agent8_report
 from . import agent3_validate
 
 __all__ = [
-    'agent2_cmdlist',
     'agent3_validate',
     'agent5_scenario',
     'agent6_strategy',

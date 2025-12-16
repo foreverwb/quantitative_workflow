@@ -9,6 +9,8 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Any
 from pathlib import Path
+import traceback
+from loguru import logger
 
 def check_data_completeness(target: dict) -> dict:
     missing_fields = []
@@ -20,7 +22,7 @@ def check_data_completeness(target: dict) -> dict:
     
     # 2. walls (4个字段)
     walls = target.get("walls", {})
-    for field in ["call_wall", "put_wall", "major_wall", "major_wall_type"]:
+    for field in ["call_wall", "put_wall", "major_wall"]:
         if not is_valid_value(walls.get(field)):
             missing_fields.append(f"walls.{field}")
     
@@ -90,7 +92,7 @@ def check_data_completeness(target: dict) -> dict:
     
     # 6. validation_metrics
     validation_metrics = target.get("validation_metrics", {})
-    validation_fields = ["zero_dte_ratio", "net_volume_signal", "net_vega_exposure", "net_theta_exposure"]
+    validation_fields = ["net_volume_signal", "net_vega_exposure"]
     
     if not validation_metrics or not isinstance(validation_metrics, dict):
         for field in validation_fields:
@@ -229,7 +231,7 @@ def main(
             current_data = json.loads(agent3_output)
         else:
             current_data = agent3_output
-            
+        
         cache_dir = Path("data/temp")
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / f"{symbol}_partial.json"
@@ -249,10 +251,10 @@ def main(
         else:
             merged_data, merge_info = smart_merge(first_data, current_data)
         
-        delta_metrics = _analyze_time_series(merged_data, cached)
-        if delta_metrics:
-            target = get_target_dict(merged_data)
-            target["delta_metrics"] = delta_metrics
+        # delta_metrics = _analyze_time_series(merged_data, cached)
+        # if delta_metrics:
+        #     target = get_target_dict(merged_data)
+        #     target["delta_metrics"] = delta_metrics
             
         target = get_target_dict(merged_data)
         completeness = check_data_completeness(target)
@@ -269,16 +271,18 @@ def main(
             "result": json.dumps(merged_data, ensure_ascii=False, indent=2),
             "completeness": completeness,
             "symbol": symbol,
-            "delta_analysis": delta_metrics,
+            # "delta_analysis": delta_metrics,
             "merge_log": format_merge_history(cached.get("merge_history", [])) # Return merge log
         }
         
     except Exception as e:
-        import traceback
+        logger.error(f"❌ Aggregator 执行失败: {e}")
+        logger.error(traceback.format_exc())
         return {
             "result": json.dumps({
                 "error": True,
-                "message": str(e),
+                "error_message": str(e),
+                "error_type": type(e).__name__,
                 "trace": traceback.format_exc()
             }, ensure_ascii=False, indent=2)
         }

@@ -23,10 +23,9 @@ from utils.console_printer import (
     print_success,
     print_error,
     print_info,
-    print_warning
+    print_report_link
 )
 from core.error_handler import ErrorHandler, WorkflowError, ErrorCategory, ErrorSeverity
-
 
 class AnalysisPipeline:
     """分析流程编排器（增强版）"""
@@ -391,11 +390,10 @@ class AnalysisPipeline:
         
         context["html_report_result"] = result
         
-        # 打印 HTML 文件路径
         if result.get("status") == "success":
             html_path = result.get("html_path", "")
-            if self.enable_pretty_print:
-                print_success(f"HTML 报告已生成: {html_path}")
+        if html_path and self.enable_pretty_print:
+            print_report_link(html_path, symbol)
         
         return context
     

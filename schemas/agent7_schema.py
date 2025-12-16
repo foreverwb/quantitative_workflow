@@ -1,6 +1,5 @@
 """
-Agent 7: 策略排序 Schema (v2.2)
-变更：移除 zero_dte_ratio
+Agent 7: 策略排序 Schema
 """
 
 def get_schema() -> dict:
@@ -36,7 +35,6 @@ def get_schema() -> dict:
                         "type": "array",
                         "items": {"type": "string"}
                     },
-                    # 移除了 zero_dte_ratio
                     "is_vetoed": {"type": "boolean"},
                     "strategy_bias": {"type": "string"}
                 }

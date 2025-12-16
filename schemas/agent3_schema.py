@@ -1,13 +1,13 @@
 """
-Agent 3 JSON Schema - 修复版（符合 Vision Structured Output 规范）
+Agent 3 JSON Schema - v3（符合新 RuntimeLabel 规范）
 
 变更:
-1. 移除 zero_dte_ratio 和 net_theta_exposure (减法)
-2. 保留 net_volume_signal 和 net_vega_exposure
+1. 添加 abs_gex_peaks 数组结构
+2. 更新 validation_metrics 结构
 """
 
 def get_schema() -> dict:
-    """返回 Agent 3 的 JSON Schema（Vision Strict Mode 兼容版）"""
+    """返回 Agent 3 的 JSON Schema"""
     return {
         "type": "object",
         "required": ["timestamp", "targets", "indices"],
@@ -53,17 +53,12 @@ def get_schema() -> dict:
                         "required": [
                             "call_wall",
                             "put_wall",
-                            "major_wall",
-                            "major_wall_type"
+                            "major_wall"
                         ],
                         "properties": {
                             "call_wall": {"type": "number"},
                             "put_wall": {"type": "number"},
-                            "major_wall": {"type": "number"},
-                            "major_wall_type": {
-                                "type": "string",
-                                "enum": ["call", "put", "N/A"]
-                            }
+                            "major_wall": {"type": "number"}
                         },
                         "additionalProperties": False
                     },
@@ -77,11 +72,8 @@ def get_schema() -> dict:
                             "vol_trigger",
                             "spot_vs_trigger",
                             "net_gex",
-                            "nearby_peak",
-                            "next_cluster_peak",
-                            "gap_distance_dollar",
-                            "monthly_data",
-                            "weekly_data"
+                            "abs_gex_peaks",
+                            "gap_distance_dollar"
                         ],
                         "properties": {
                             "vol_trigger": {"type": "number"},
@@ -94,7 +86,24 @@ def get_schema() -> dict:
                                 "enum": ["positive_gamma", "negative_gamma"]
                             },
                             
-                            # 近旁峰高 (关键战术数据)
+                            # 新增: peaks 数组
+                            "abs_gex_peaks": {
+                                "type": "array",
+                                "description": "ABS GEX 峰值列表",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["price", "abs_gex"],
+                                    "properties": {
+                                        "price": {"type": "number"},
+                                        "abs_gex": {"type": "number"}
+                                    },
+                                    "additionalProperties": False
+                                }
+                            },
+                            
+                            "gap_distance_dollar": {"type": "number"},
+                            
+                            # 保留旧结构兼容
                             "nearby_peak": {
                                 "type": "object",
                                 "required": ["price", "abs_gex"],
@@ -115,9 +124,6 @@ def get_schema() -> dict:
                                 "additionalProperties": False
                             },
                             
-                            "gap_distance_dollar": {"type": "number"},
-                            
-                            # 月度数据
                             "monthly_data": {
                                 "type": "object",
                                 "required": ["cluster_strength"],
@@ -135,7 +141,6 @@ def get_schema() -> dict:
                                 "additionalProperties": False
                             },
                             
-                            # 周度数据
                             "weekly_data": {
                                 "type": "object",
                                 "required": ["cluster_strength"],
@@ -208,11 +213,11 @@ def get_schema() -> dict:
                     },
                     
                     # ------------------------
-                    # 2.5 验证指标 (减法后)
+                    # 2.5 验证指标
                     # ------------------------
                     "validation_metrics": {
                         "type": "object",
-                        "description": "验证型数据，已移除高噪音指标",
+                        "description": "验证型数据",
                         "required": [
                             "net_volume_signal",
                             "net_vega_exposure"
@@ -234,6 +239,10 @@ def get_schema() -> dict:
                 },
                 "additionalProperties": False
             },
+            
+            # ============================================
+            # 3. 指数数据
+            # ============================================
             "indices": {
                 "type": "object",
                 "description": "指数背景数据",

@@ -7,7 +7,8 @@ import json
 import sys
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-
+from pathlib import Path
+import os
 
 class ConsolePrinter:
     """控制台美化打印器"""
@@ -534,57 +535,33 @@ def print_error_summary(error_report: Dict):
     
     print()
 
-
-# ============================================
-# 使用示例
-# ============================================
-
-if __name__ == "__main__":
-    # 测试各种输出
-    print_header("期权分析策略系统", "完整分析流程")
+def print_report_link(html_path: str, symbol: str = ""):
+    """
+    打印可点击的报告链接
     
-    print_step(1, 9, "数据校验")
+    Args:
+        html_path: HTML 文件路径
+        symbol: 股票代码
+    """
     
-    print_agent_start("Agent3", "解析图表数据")
+    # 转换为绝对路径
+    abs_path = Path(html_path).resolve()
     
-    # 模拟 Agent 结果
-    agent_result = {
-        "model": "gpt-4o",
-        "usage": {"input_tokens": 1000, "output_tokens": 500},
-        "content": {
-            "symbol": "NVDA",
-            "spot_price": 194.1,
-            "status": "complete",
-            "gamma_metrics": {
-                "vol_trigger": 178,
-                "net_gex": 199.89
-            }
-        }
-    }
+    # 生成 file:// URL
+    if os.name == 'nt':  # Windows
+        file_url = f"file:///{str(abs_path).replace(os.sep, '/')}"
+    else:  # macOS / Linux
+        file_url = f"file://{abs_path}"
     
-    print_agent_result("Agent3", agent_result, show_full=True)
-    
-    print_code_node_start("Calculator", "计算衍生字段")
-    
-    # 模拟 Code Node 结果
-    code_result = {
-        "result": json.dumps({
-            "status": "complete",
-            "data_status": "ready",
-            "validation": {
-                "is_complete": True,
-                "missing_fields": [],
-                "provided": 23,
-                "total_required": 23,
-                "completion_rate": 100
-            },
-            "targets": {
-                "spot_price": 194.1,
-                "em1_dollar": 5.5
-            }
-        }, ensure_ascii=False)
-    }
-    
-    print_code_node_result("Calculator", code_result, show_full=True)
-    
-    print_success("流程执行完成")
+    # 打印分隔线和链接
+    print()
+    printer._print_separator('═', 80, 'bright_green')
+    print(printer._colorize(f"  {printer.ICONS['success']} 报告生成完成！", 'bold'))
+    printer._print_separator('─', 80, 'dim')
+    print()
+    print(printer._colorize(f"  📊 {symbol} 策略分析报告", 'bright_cyan'))
+    print()
+    print(printer._colorize(f"  📁 文件路径: {abs_path}", 'dim'))
+    print()
+    printer._print_separator('═', 80, 'bright_green')
+    print()

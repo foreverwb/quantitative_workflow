@@ -8,6 +8,8 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from utils.config_loader import config
+import json
+import traceback
 
 @dataclass
 class StrategyMetrics:
@@ -163,5 +165,11 @@ def main(strategies_output: dict, scenario_output: dict, agent3_output: dict, **
         engine = ComparisonEngine(env_vars)
         return engine.process(strategies_output, scenario_output, agent3_output)
     except Exception as e:
-        import traceback
-        return {"error": True, "message": str(e), "traceback": traceback.format_exc()}
+        
+        return {
+        "result": json.dumps({
+            "error": True,
+            "message": str(e),
+            "trace": traceback.format_exc()
+        }, ensure_ascii=False, indent=2)
+    }

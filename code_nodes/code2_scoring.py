@@ -4,8 +4,10 @@ Code 2: 评分引擎
 """
 import json
 from typing import Dict, Any, Tuple
-from utils.config_loader import config  # ✅ 单例配置
-from utils.formatters import F  # 安全格式化工具
+from utils.config_loader import config 
+from utils.formatters import F
+import traceback
+from loguru import logger
 
 def main(agent3_output: dict, technical_score: float = 0, **env_vars) -> dict:
     """
@@ -20,10 +22,16 @@ def main(agent3_output: dict, technical_score: float = 0, **env_vars) -> dict:
         return result
         
     except Exception as e:
+        
+        logger.error(f"❌ Scoring calculation failed")
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
+        
         error_result = {
             "error": True,
             "error_message": str(e),
-            "error_type": type(e).__name__
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()  
         }
         return {
             "result": json.dumps(error_result, ensure_ascii=False, indent=2)
@@ -40,6 +48,7 @@ class OptionsScoring:
         self.conf = config.scoring
         self.env_gamma = config.gamma
         self.env_dir = config.direction
+        self.pw_config = config.get_section('pw_calculation')
         self.market_params = env_vars.get('market_params', {})
         self.dynamic_weights_config = self.conf.dynamic_weights
     
@@ -178,8 +187,8 @@ class OptionsScoring:
         dex_same_dir = directional_metrics.get('dex_same_dir_pct', 0)
         vanna_dir = directional_metrics.get('vanna_dir', 'neutral')
         vanna_confidence = directional_metrics.get('vanna_confidence', 'low')
+        pw_debit = self.pw_config.get('debit')
         
-        pw_debit = config.pw_calculation.debit
         vanna_weight_map = {
             'high': pw_debit.vanna_weight_high,
             'medium': pw_debit.vanna_weight_medium,
