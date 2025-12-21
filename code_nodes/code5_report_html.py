@@ -24,8 +24,10 @@ def markdown_to_html(text: str) -> str:
     html_lines = []
     in_list = False
     in_code = False
+    in_table = False
+    table_header_done = False
     
-    for line in lines:
+    for i, line in enumerate(lines):
         line = line.strip()
         
         # 代码块处理
@@ -44,6 +46,10 @@ def markdown_to_html(text: str) -> str:
             
         # 标题处理
         if line.startswith('#'):
+            if in_table:
+                html_lines.append('</tbody></table>')
+                in_table = False
+                table_header_done = False
             level = len(line.split(' ')[0])
             content = line[level:].strip()
             html_lines.append(f'<h{level}>{content}</h{level}>')
@@ -51,6 +57,10 @@ def markdown_to_html(text: str) -> str:
             
         # 列表处理
         if line.startswith('- ') or line.startswith('* '):
+            if in_table:
+                html_lines.append('</tbody></table>')
+                in_table = False
+                table_header_done = False
             if not in_list:
                 html_lines.append('<ul>')
                 in_list = True
@@ -63,14 +73,37 @@ def markdown_to_html(text: str) -> str:
             html_lines.append('</ul>')
             in_list = False
             
-        # 表格处理 (简单)
-        if '|' in line and ('---' not in line):
-            # 简单将行包裹，实际渲染需更复杂逻辑，这里简化处理
+        # 表格处理 (完整版)
+        if '|' in line:
+            # 跳过分隔符行 (如 |------|------|)
+            if re.match(r'^[\|\s\-:]+$', line):
+                continue
+            
             cols = [c.strip() for c in line.split('|') if c.strip()]
             if cols:
-                row_html = "".join([f"<td>{c}</td>" for c in cols])
-                html_lines.append(f"<div class='table-row'>{row_html}</div>")
-            continue
+                # 检查是否是表头行（下一行是分隔符）
+                next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                is_header = re.match(r'^[\|\s\-:]+$', next_line)
+                
+                if not in_table:
+                    html_lines.append('<table class="strategy-table">')
+                    in_table = True
+                    table_header_done = False
+                
+                if is_header and not table_header_done:
+                    # 表头行
+                    row_html = "".join([f"<th>{c}</th>" for c in cols])
+                    html_lines.append(f"<thead><tr>{row_html}</tr></thead><tbody>")
+                    table_header_done = True
+                else:
+                    # 数据行
+                    row_html = "".join([f"<td>{c}</td>" for c in cols])
+                    html_lines.append(f"<tr>{row_html}</tr>")
+                continue
+        elif in_table:
+            html_lines.append('</tbody></table>')
+            in_table = False
+            table_header_done = False
             
         # 普通段落
         if line:
@@ -78,8 +111,11 @@ def markdown_to_html(text: str) -> str:
             content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
             html_lines.append(f'<p>{content}</p>')
             
+    # 关闭未闭合的标签
     if in_list:
         html_lines.append('</ul>')
+    if in_table:
+        html_lines.append('</tbody></table>')
         
     return '\n'.join(html_lines)
 
@@ -184,17 +220,18 @@ def get_dashboard_template(symbol: str, tabs: List[Dict]) -> str:
     <title>{symbol} 策略监控仪表盘</title>
     <style>
         :root {{
-            --bg-body: #0f172a;
-            --bg-card: #1e293b;
-            --bg-nav: #334155;
-            --text-main: #f1f5f9;
-            --text-sub: #94a3b8;
-            --accent: #0ea5e9;
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --bg-nav: #f1f5f9;
+            --bg-hover: #e2e8f0;
+            --text-main: #1e293b;
+            --text-sub: #64748b;
+            --accent: #2563eb;
             --active-tab: #2563eb;
-            --border: #475569;
-            --danger: #ef4444;
-            --success: #10b981;
-            --warning: #f59e0b;
+            --border: #e2e8f0;
+            --danger: #dc2626;
+            --success: #16a34a;
+            --warning: #d97706;
         }}
         
         body {{
@@ -215,12 +252,13 @@ def get_dashboard_template(symbol: str, tabs: List[Dict]) -> str:
             align-items: center;
             margin-bottom: 20px;
             padding-bottom: 10px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 2px solid var(--border);
         }}
         .header h1 {{ margin: 0; font-size: 24px; color: var(--accent); }}
         .header .badge {{ 
             background: var(--bg-nav); padding: 4px 12px; 
-            border-radius: 20px; font-size: 12px; 
+            border-radius: 20px; font-size: 12px; color: var(--text-sub);
+            border: 1px solid var(--border);
         }}
         
         /* Tabs Navigation */
@@ -229,7 +267,8 @@ def get_dashboard_template(symbol: str, tabs: List[Dict]) -> str:
             background: var(--bg-card);
             border-radius: 8px 8px 0 0;
             overflow: hidden;
-            border-bottom: 1px solid var(--border);
+            border: 1px solid var(--border);
+            border-bottom: none;
         }}
         
         .tab-btn {{
@@ -244,7 +283,7 @@ def get_dashboard_template(symbol: str, tabs: List[Dict]) -> str:
             font-weight: 600;
         }}
         
-        .tab-btn:hover {{ background-color: var(--bg-nav); color: var(--text-main); }}
+        .tab-btn:hover {{ background-color: var(--bg-hover); color: var(--text-main); }}
         
         .tab-btn.active {{
             background-color: var(--active-tab);
@@ -259,6 +298,9 @@ def get_dashboard_template(symbol: str, tabs: List[Dict]) -> str:
             border-radius: 0 0 8px 8px;
             min-height: 500px;
             animation: fadeEffect 0.5s;
+            border: 1px solid var(--border);
+            border-top: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }}
         
         .tab-content.active {{ display: block; }}
@@ -277,44 +319,110 @@ def get_dashboard_template(symbol: str, tabs: List[Dict]) -> str:
         }}
         
         .metric-card {{
-            background: var(--bg-body);
+            background: var(--bg-nav);
             padding: 15px;
             border-radius: 8px;
             text-align: center;
             border: 1px solid var(--border);
         }}
-        .metric-val {{ font-size: 24px; font-weight: bold; margin: 5px 0; }}
+        .metric-val {{ font-size: 24px; font-weight: bold; margin: 5px 0; color: var(--text-main); }}
         .metric-label {{ font-size: 12px; color: var(--text-sub); text-transform: uppercase; }}
         
         .alert-box {{
-            background: rgba(239, 68, 68, 0.1);
+            background: #fef2f2;
             border-left: 4px solid var(--danger);
             padding: 15px;
             margin-bottom: 20px;
+            border-radius: 0 4px 4px 0;
         }}
         
         .action-box {{
-            background: rgba(16, 185, 129, 0.1);
+            background: #f0fdf4;
             border-left: 4px solid var(--success);
             padding: 15px;
             margin-bottom: 20px;
+            border-radius: 0 4px 4px 0;
         }}
         
         .info-box {{
-            background: rgba(14, 165, 233, 0.1);
+            background: #eff6ff;
             border-left: 4px solid var(--accent);
             padding: 15px;
             margin-bottom: 20px;
+            border-radius: 0 4px 4px 0;
         }}
         
         h3 {{ color: var(--text-main); border-bottom: 1px solid var(--border); padding-bottom: 8px; }}
         
         /* Markdown Content Styles */
         .markdown-body {{ font-size: 15px; }}
-        .markdown-body h1, .markdown-body h2 {{ color: var(--accent); margin-top: 20px; }}
-        .markdown-body table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
-        .markdown-body th, .markdown-body td {{ border: 1px solid var(--border); padding: 8px; }}
-        .markdown-body th {{ background: var(--bg-nav); }}
+        .markdown-body h1 {{ color: var(--accent); margin-top: 20px; font-size: 22px; }}
+        .markdown-body h2 {{ color: var(--accent); margin-top: 20px; font-size: 18px; }}
+        .markdown-body h3 {{ color: var(--text-main); margin-top: 15px; font-size: 16px; }}
+        
+        /* 列表样式 */
+        .markdown-body ul {{ 
+            padding-left: 20px; 
+            margin: 10px 0;
+        }}
+        .markdown-body li {{ 
+            margin-bottom: 8px; 
+            color: var(--text-main);
+        }}
+        
+        /* 通用表格样式 */
+        .markdown-body table, 
+        .strategy-table {{ 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin: 20px 0; 
+            background: var(--bg-card);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }}
+        .markdown-body th, .markdown-body td,
+        .strategy-table th, .strategy-table td {{ 
+            border: 1px solid var(--border); 
+            padding: 12px 15px; 
+            text-align: left;
+        }}
+        .markdown-body th,
+        .strategy-table th {{ 
+            background: var(--bg-nav); 
+            font-weight: 600;
+            color: var(--text-main);
+        }}
+        .markdown-body tr:nth-child(even),
+        .strategy-table tr:nth-child(even) {{ 
+            background: var(--bg-body); 
+        }}
+        .markdown-body tr:hover,
+        .strategy-table tr:hover {{ 
+            background: var(--bg-hover); 
+        }}
+        
+        /* 代码块样式 */
+        .code-block {{
+            background: var(--bg-nav);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+            overflow-x: auto;
+        }}
+        .code-block pre {{
+            margin: 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            color: var(--text-main);
+        }}
+        
+        /* 段落样式 */
+        .markdown-body p {{
+            margin: 10px 0;
+            color: var(--text-main);
+        }}
         
     </style>
 </head>

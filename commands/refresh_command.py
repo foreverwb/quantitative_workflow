@@ -1,6 +1,9 @@
 """
 Refresh 命令处理器
 处理盘中快照刷新
+支持两种模式：
+1. 图片文件夹模式 (-f)：从图片提取数据
+2. 输入文件模式 (-i)：从JSON文件读取数据
 """
 
 import sys
@@ -18,8 +21,9 @@ class RefreshCommand(BaseCommand):
     def execute(
         self,
         symbol: str,
-        folder: str,
-        cache: str,
+        folder: str = None,
+        input_file: str = None,
+        cache: str = None,
         **kwargs  # 接收 market_params, dyn_params
     ) -> Dict[str, Any]:
         """
@@ -27,7 +31,8 @@ class RefreshCommand(BaseCommand):
         
         Args:
             symbol: 股票代码
-            folder: 数据文件夹路径
+            folder: 数据文件夹路径 (与 input_file 互斥)
+            input_file: 输入JSON文件路径 (与 folder 互斥)
             cache: 缓存文件名（必需）
             **kwargs: 额外参数
                 - market_params: 市场参数 (vix, ivr, iv30, hv20)
@@ -70,23 +75,53 @@ class RefreshCommand(BaseCommand):
         # 1.4 显示缓存信息
         self._print_cache_info(cache_info)
         
-        # 1.5 验证文件夹
+        # ============= 2. 根据模式执行 =============
+        
+        if input_file:
+            # 输入文件模式
+            return self._execute_input_file_mode(
+                symbol=symbol,
+                input_file=input_file,
+                cache=cache,
+                market_params=market_params,
+                dyn_params=dyn_params
+            )
+        else:
+            # 图片文件夹模式
+            return self._execute_folder_mode(
+                symbol=symbol,
+                folder=folder,
+                cache=cache,
+                market_params=market_params,
+                dyn_params=dyn_params
+            )
+    
+    def _execute_folder_mode(
+        self,
+        symbol: str,
+        folder: str,
+        cache: str,
+        market_params: Dict,
+        dyn_params: Dict
+    ) -> Dict[str, Any]:
+        """图片文件夹模式"""
+        # 验证文件夹
         folder_path = Path(folder)
         is_valid, msg = self.validate_folder(folder_path)
         if not is_valid:
             self.print_error(msg)
             sys.exit(1)
         
-        # ============= 2. 打印标题 =============
+        # 打印标题
         self.console.print(Panel.fit(
             f"[bold cyan]📸 盘中快照: {symbol.upper()}[/bold cyan]\n"
-            f"[dim]仅运行 Agent3 + 计算引擎[/dim]",
+            f"[dim]模式: 图片文件夹 | Agent3 + 计算引擎[/dim]",
             border_style="cyan"
         ))
         
         self.console.print(f"[dim]📊 {msg}[/dim]")
         
-        # ============= 3. 执行刷新 =============
+        # 执行刷新
         engine = self.create_engine(cache_file=cache)
         
         try:
@@ -101,25 +136,202 @@ class RefreshCommand(BaseCommand):
                     symbol=symbol.upper(),
                     data_folder=folder_path,
                     mode="refresh",
-                    market_params=market_params,  # 传递市场参数
-                    dyn_params=dyn_params         # 传递动态参数
+                    market_params=market_params,
+                    dyn_params=dyn_params
                 )
                 
                 progress.update(task, completed=True)
             
-            # ============= 4. 显示结果 =============
             return self._handle_result(result, symbol)
         
         except Exception as e:
             self.print_error(str(e))
             sys.exit(1)
     
+    def _execute_input_file_mode(
+        self,
+        symbol: str,
+        input_file: str,
+        cache: str,
+        market_params: Dict,
+        dyn_params: Dict
+    ) -> Dict[str, Any]:
+        """输入文件模式"""
+        from code_nodes.code_input_calc import InputFileCalculator
+        from core.workflow import CacheManager
+        from core.workflow.drift_engine import DriftEngine
+        from code_nodes.code5_report_html import main as html_gen_main
+        
+        # 验证输入文件
+        input_path = Path(input_file)
+        if not input_path.exists():
+            self.print_error(f"输入文件不存在: {input_file}")
+            sys.exit(1)
+        
+        # 打印标题
+        self.console.print(Panel.fit(
+            f"[bold cyan]📸 盘中快照: {symbol.upper()}[/bold cyan]\n"
+            f"[dim]模式: 输入文件 | 计算引擎[/dim]",
+            border_style="cyan"
+        ))
+        
+        self.console.print(f"[dim]📄 输入文件: {input_file}[/dim]")
+        
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=self.console
+            ) as progress:
+                task = progress.add_task("正在处理输入文件...", total=None)
+                
+                # Step 1: 加载并计算 cluster_strength_ratio
+                calculator = InputFileCalculator(input_file)
+                calculator.load()
+                calc_result = calculator.calculate()
+                
+                progress.update(task, description="提取目标数据...")
+                
+                # Step 2: 从 spec.targets 提取已计算好的数据
+                # 输入文件的 spec.targets 已包含完整的目标数据结构
+                full_data = calculator.data
+                spec_targets = full_data.get("spec", {}).get("targets", {})
+                
+                if not spec_targets:
+                    self.print_error("输入文件缺少 spec.targets 数据")
+                    sys.exit(1)
+                
+                # 确保 cluster_strength_ratio 已更新到 spec_targets
+                if "gamma_metrics" not in spec_targets:
+                    spec_targets["gamma_metrics"] = {}
+                spec_targets["gamma_metrics"]["cluster_strength_ratio"] = calc_result["cluster_strength_ratio"]
+                
+                # 补充计算 em1_dollar (如果不存在)
+                if not spec_targets.get("em1_dollar"):
+                    spot_price = spec_targets.get("spot_price")
+                    atm_iv = spec_targets.get("atm_iv", {})
+                    iv30 = atm_iv.get("iv_30d") or atm_iv.get("iv30") or market_params.get("iv30")
+                    
+                    if spot_price and iv30:
+                        import math
+                        # 简化计算: em1_dollar ≈ spot * iv30% / sqrt(52) (周度)
+                        em1_dollar = spot_price * (float(iv30) / 100) / math.sqrt(52)
+                        spec_targets["em1_dollar"] = round(em1_dollar, 2)
+                        self.console.print(f"[dim]   EM1$: ${spec_targets['em1_dollar']} (计算值)[/dim]")
+                
+                # 构建 calculated_result (与 field_calculator 输出格式一致)
+                calculated_result = {
+                    "data_status": "ready",
+                    "targets": spec_targets,
+                    # 保留元数据
+                    "metadata": full_data.get("metadata", {}),
+                }
+                
+                # 打印关键数据
+                spot_price = spec_targets.get("spot_price", "N/A")
+                gamma_metrics = spec_targets.get("gamma_metrics", {})
+                vol_trigger = gamma_metrics.get("vol_trigger", "N/A")
+                
+                self.console.print(f"[dim]   Spot: ${spot_price}, Vol Trigger: ${vol_trigger}[/dim]")
+                self.console.print(f"[dim]   cluster_strength_ratio: {calc_result['cluster_strength_ratio']} ({calc_result['tier']})[/dim]")
+                
+                progress.update(task, description="分析结构漂移...")
+                
+                # Step 3: 加载基准数据并分析漂移
+                cache_manager = CacheManager()
+                last_snapshot = cache_manager.load_latest_greeks_snapshot(symbol)
+                if not last_snapshot:
+                    full_analysis = cache_manager.load_analysis(symbol)
+                    last_snapshot = full_analysis.get("source_target", {}) if full_analysis else {}
+                
+                drift_engine = DriftEngine()
+                drift_report = drift_engine.analyze(last_snapshot, calculated_result)
+                
+                progress.update(task, description="保存快照...")
+                
+                # Step 4: 保存快照
+                calculated_result["drift_report"] = drift_report
+                snapshot_result = cache_manager.save_greeks_snapshot(
+                    symbol=symbol,
+                    data=calculated_result,
+                    note=f"监控: {drift_report.get('summary', '')}",
+                    is_initial=False,
+                    cache_file_name=cache
+                )
+                
+                progress.update(task, description="生成报告...")
+                
+                # Step 5: 生成聚合 Dashboard HTML
+                all_history = cache_manager.get_all_snapshots(symbol)
+                html_result = html_gen_main(
+                    mode="dashboard",
+                    symbol=symbol,
+                    all_history=all_history,
+                    output_dir="data/output"
+                )
+                
+                progress.update(task, completed=True)
+            
+            # 显示漂移报告
+            self._print_drift_dashboard(drift_report)
+            
+            if html_result.get("status") == "success":
+                from utils.console_printer import print_report_link
+                print_report_link(html_result['html_path'], symbol)
+            
+            return {
+                "status": "success",
+                "snapshot": snapshot_result.get("snapshot"),
+                "drift_report": drift_report
+            }
+        
+        except Exception as e:
+            import traceback
+            self.print_error(f"处理失败: {str(e)}")
+            self.console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            sys.exit(1)
+    
+    def _print_drift_dashboard(self, report: Dict):
+        """打印漂移分析仪表盘"""
+        from rich.table import Table
+        
+        print("\n")
+        self.console.print(Panel(
+            f"[bold]🛡️ 监控建议 (Drift Engine)[/bold]\n"
+            f"状态: {report['summary']}",
+            style="cyan", border_style="cyan"
+        ))
+        
+        if report.get("actions"):
+            table = Table(title="操作指令", show_header=True, header_style="bold magenta")
+            table.add_column("方向", style="dim", width=8)
+            table.add_column("动作", style="bold", width=12)
+            table.add_column("触发逻辑")
+            
+            for action in report["actions"]:
+                color = "red" if action['type'] in ['stop_loss', 'exit', 'clear_position', 'tighten_stop'] else "green" if action['type'] == 'take_profit' else "yellow"
+                table.add_row(
+                    action['side'].upper(),
+                    f"[{color}]{action['type'].upper()}[/{color}]",
+                    action['reason']
+                )
+            self.console.print(table)
+        else:
+            self.console.print("[dim]   未触发关键风控阈值，维持原策略[/dim]")
+        
+        if report.get("alerts"):
+            self.console.print("\n[bold red]风险警示:[/bold red]")
+            for alert in report["alerts"]:
+                self.console.print(f"  • {alert}")
+        print("\n")
+    
     # ============= 私有辅助方法 =============
     
     def _print_usage_hint(self, symbol: str):
         """打印使用提示"""
         self.console.print(f"\n[yellow]💡 提示:[/yellow]")
-        self.console.print(f"[cyan]   python app.py refresh -s {symbol.upper()} -f <folder> --cache {symbol.upper()}_20251129.json[/cyan]")
+        self.console.print(f"[cyan]   python app.py refresh {symbol.upper()} -f <folder> --cache {symbol.upper()}_20251129.json[/cyan]")
+        self.console.print(f"[cyan]   python app.py refresh {symbol.upper()} -i <input.json> --cache {symbol.upper()}_20251129.json[/cyan]")
         self.console.print(f"\n[dim]提示: 可用的缓存文件位于 data/output/{symbol.upper()}/ 目录下[/dim]")
     
     def _print_troubleshooting(self, symbol: str, cache: str):

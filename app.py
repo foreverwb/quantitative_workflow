@@ -149,18 +149,25 @@ def cli():
 @cli.command()
 @click.argument('symbol')
 @click.option('-f', '--folder', type=click.Path(exists=True), help='数据文件夹路径')
+@click.option('-i', '--input', 'input_file', type=click.Path(), help='输入JSON文件路径 (与 -f 互斥)')
 @click.option('-p', '--params', 'params_input', help='市场参数 JSON 或文件路径')
 @click.option('-c', '--cache', help='缓存文件名 (如 NVDA_20251206.json)')
 @click.option('-o', '--output', type=click.Path(), help='输出文件路径')
+@click.option('--calc-only', is_flag=True, help='仅计算 cluster_strength_ratio，不执行下游节点')
 @click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
-def analyze(symbol: str, folder: str, params_input: str, cache: str, output: str, model_config: str):
+def analyze(symbol: str, folder: str, input_file: str, params_input: str, cache: str, output: str, calc_only: bool, model_config: str):
     """
     智能分析命令
     
     \b
-    两种模式：
+    三种模式：
     1. 生成命令清单（无 -f）：需要 -p 指定市场参数
     2. 完整分析（有 -f）：需要 --cache 指定缓存文件
+    3. 输入文件分析（有 -i）：从JSON读取数据，执行完整分析流程
+       - 添加 --calc-only 仅计算 cluster_strength_ratio
+    
+    \b
+    注意: -f 和 -i 参数互斥，不能同时使用
     
     \b
     示例:
@@ -169,9 +176,178 @@ def analyze(symbol: str, folder: str, params_input: str, cache: str, output: str
       
       # 完整分析
       analyze NVDA -f ./data/images --cache NVDA_20251206.json
+      
+      # 输入文件分析（完整流程）
+      analyze AAPL -i ./data/input/symbol_datetime.json --cache AAPL_20251215.json
+      
+      # 输入文件计算（仅计算 cluster_strength_ratio）
+      analyze AAPL -i ./data/input/symbol_datetime.json --calc-only
     """
     setup_logging()
     symbol = symbol.upper()
+    
+    # 检查 -i 和 -f 参数互斥
+    if input_file and folder:
+        console.print("[red]❌ 参数错误: -i 和 -f 参数互斥，不能同时使用[/red]")
+        console.print("[yellow]💡 提示:[/yellow]")
+        console.print("[dim]   使用 -f 进行完整分析（从图片提取数据）[/dim]")
+        console.print("[dim]   使用 -i 进行输入文件分析（从JSON读取数据）[/dim]")
+        sys.exit(1)
+    
+    # ========== 模式3: 输入文件分析（-i 参数）==========
+    if input_file:
+        from code_nodes.code_input_calc import InputFileCalculator, load_json_with_comments
+        from code_nodes import calculator_main
+        from core.workflow.pipeline import AnalysisPipeline
+        from core.workflow import AgentExecutor, CacheManager
+        
+        console.print(f"\n[bold cyan]📊 Swing Quant - 输入文件分析 {symbol}[/bold cyan]")
+        console.print(f"[dim]输入文件: {input_file}[/dim]")
+        
+        try:
+            # Step 1: 加载 JSON 文件
+            calculator = InputFileCalculator(input_file)
+            calculator.load()
+            
+            # Step 2: 计算 cluster_strength_ratio
+            calc_result = calculator.calculate()
+            
+            console.print(f"\n[green]✅ cluster_strength_ratio 计算完成[/green]")
+            console.print(f"[dim]   Tier: {calc_result['tier']}, Ratio: {calc_result['cluster_strength_ratio']}[/dim]")
+            
+            # 写回文件
+            output_path = output if output else input_file
+            calculator.write_back(output_path)
+            console.print(f"[dim]   已更新: {output_path}[/dim]")
+            
+            # 如果仅计算模式，到此结束
+            if calc_only:
+                console.print(f"\n[cyan]📈 计算结果详情:[/cyan]")
+                console.print(f"[dim]   avg_top1: {calc_result['avg_top1']:.4f}[/dim]")
+                console.print(f"[dim]   avg_enp:  {calc_result['avg_enp']:.2f}[/dim]")
+                console.print(f"[dim]   Short: top1={calc_result['short']['top1']:.4f}, enp={calc_result['short']['enp']:.2f}[/dim]")
+                console.print(f"[dim]   Mid:   top1={calc_result['mid']['top1']:.4f}, enp={calc_result['mid']['enp']:.2f}[/dim]")
+                console.print(f"[dim]   Long:  top1={calc_result['long']['top1']:.4f}, enp={calc_result['long']['enp']:.2f}[/dim]")
+                return
+            
+            # Step 3: 继续执行下游节点（需要 cache 文件）
+            if not cache:
+                console.print("\n[yellow]⚠️ 未指定 --cache 参数，跳过下游节点[/yellow]")
+                console.print("[dim]   若需执行完整分析，请添加 --cache 参数指定缓存文件[/dim]")
+                console.print(f"[dim]   示例: analyze {symbol} -i {input_file} --cache {symbol}_20251215.json[/dim]")
+                return
+            
+            console.print(f"\n[cyan]🔄 继续执行下游节点...[/cyan]")
+            
+            # 加载缓存参数
+            cached = load_cache_params(symbol, cache)
+            market_params = cached.get('market_params', {})
+            dyn_params = cached.get('dyn_params', {})
+            
+            console.print(f"[dim]   从缓存加载: market_params={bool(market_params)}, dyn_params={bool(dyn_params)}[/dim]")
+            
+            # Step 4: 构造 Calculator 输入（与 Agent3 输出格式一致）
+            raw_data = load_json_with_comments(input_file)
+            agent3_like_data = {
+                "targets": raw_data.get("spec", {}).get("targets", {}),
+                "indices": raw_data.get("spec", {}).get("indices", {})
+            }
+            
+            # 确保 cluster_strength_ratio 已更新
+            if "gamma_metrics" not in agent3_like_data["targets"]:
+                agent3_like_data["targets"]["gamma_metrics"] = {}
+            agent3_like_data["targets"]["gamma_metrics"]["cluster_strength_ratio"] = calc_result['cluster_strength_ratio']
+            
+            console.print(f"[dim]   数据转换完成，targets.symbol={agent3_like_data['targets'].get('symbol')}[/dim]")
+            
+            # Step 5: 将数据写入缓存的 source_target.data（方案 C）
+            from core.workflow import CacheManager
+            cache_manager = CacheManager()
+            
+            if cache_manager.update_source_target_data(symbol, cache, agent3_like_data):
+                console.print(f"[dim]   ✅ 数据已写入 cache.source_target.data[/dim]")
+            else:
+                console.print(f"[yellow]   ⚠️ 写入 source_target.data 失败[/yellow]")
+            
+            # Step 6: 调用 Calculator
+            console.print(f"\n[yellow]📐 执行 Calculator...[/yellow]")
+            
+            # 加载模型配置（Calculator 可能需要）
+            model_client = ModelClientFactory.create_from_config(model_config)
+            env_vars = {
+                'config': config,
+                'market_params': market_params
+            }
+            
+            agent_executor = AgentExecutor(model_client, env_vars)
+            
+            calc_output = agent_executor.execute_code_node(
+                node_name="Calculator",
+                func=calculator_main,
+                aggregated_data=agent3_like_data,
+                symbol=symbol,
+                **env_vars
+            )
+            
+            # 检查 Calculator 结果
+            data_status = calc_output.get("data_status")
+            
+            if data_status == "awaiting_data":
+                console.print("\n[yellow]⚠️ 数据不完整[/yellow]")
+                validation = calc_output.get("validation", {})
+                missing = validation.get("missing_fields", [])
+                if missing:
+                    console.print(f"[dim]   缺失字段: {[m.get('path') for m in missing[:5]]}...[/dim]")
+                return
+            
+            console.print(f"[green]   ✅ Calculator 验证通过[/green]")
+            
+            # Step 7: 执行 Pipeline
+            console.print(f"\n[yellow]🚀 执行 Pipeline...[/yellow]")
+            
+            pipeline = AnalysisPipeline(
+                agent_executor=agent_executor,
+                cache_manager=cache_manager,
+                env_vars=env_vars,
+                enable_pretty_print=True,
+                cache_file=cache,
+                error_handler=None,
+                market_params=market_params,
+                dyn_params=dyn_params
+            )
+            
+            result = pipeline.run(calc_output)
+            
+            # Step 7: 处理结果
+            status = result.get("status")
+            if status == "success":
+                console.print("\n[green]✅ 分析完成![/green]")
+                
+                # 保存报告
+                if output:
+                    report_path = Path(output).with_suffix('.html')
+                    report_content = result.get("report", "")
+                    if report_content:
+                        report_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(report_path, 'w', encoding='utf-8') as f:
+                            f.write(report_content)
+                        console.print(f"[dim]   报告已保存: {report_path}[/dim]")
+            else:
+                console.print(f"\n[yellow]⚠️ 分析状态: {status}[/yellow]")
+            
+            return
+            
+        except FileNotFoundError as e:
+            console.print(f"[red]❌ 文件不存在: {e}[/red]")
+            sys.exit(1)
+        except ValueError as e:
+            console.print(f"[red]❌ 数据错误: {e}[/red]")
+            sys.exit(1)
+        except Exception as e:
+            import traceback
+            console.print(f"[red]❌ 处理失败: {e}[/red]")
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            sys.exit(1)
     
     console.print(f"\n[bold cyan]📊 Swing Quant - 分析 {symbol}[/bold cyan]")
     
@@ -378,17 +554,48 @@ def update(symbol: str, folder: str, cache: str, output: str, model_config: str)
 
 @cli.command()
 @click.argument('symbol')
-@click.option('-f', '--folder', type=click.Path(exists=True), required=True, help='数据文件夹路径')
+@click.option('-f', '--folder', type=click.Path(exists=True), help='数据文件夹路径')
+@click.option('-i', '--input', 'input_file', type=click.Path(), help='输入JSON文件路径 (与 -f 互斥)')
 @click.option('-c', '--cache', required=True, help='缓存文件名（必需）')
 @click.option('--model-config', default=DEFAULT_MODEL_CONFIG, help='模型配置文件')
-def refresh(symbol: str, folder: str, cache: str, model_config: str):
+def refresh(symbol: str, folder: str, input_file: str, cache: str, model_config: str):
     """
     刷新快照命令 - 盘中数据更新
+    
+    \b
+    两种模式：
+    1. 图片文件夹模式（-f）：从图片提取数据
+    2. 输入文件模式（-i）：从JSON文件读取数据
+    
+    \b
+    注意: -f 和 -i 参数互斥，不能同时使用
+    
+    \b
     示例:
+      # 图片文件夹模式
       refresh NVDA -f ./data/latest -c NVDA_20251206.json
+      
+      # 输入文件模式
+      refresh NVDA -i ./data/input/nvda_datetime.json -c NVDA_20251206.json
     """
     setup_logging()
     symbol = symbol.upper()
+    
+    # 检查 -i 和 -f 参数互斥
+    if input_file and folder:
+        console.print("[red]❌ 参数错误: -i 和 -f 参数互斥，不能同时使用[/red]")
+        console.print("[yellow]💡 提示:[/yellow]")
+        console.print("[dim]   使用 -f 进行图片文件夹模式（从图片提取数据）[/dim]")
+        console.print("[dim]   使用 -i 进行输入文件模式（从JSON读取数据）[/dim]")
+        sys.exit(1)
+    
+    # 检查至少有一个数据源
+    if not input_file and not folder:
+        console.print("[red]❌ 参数错误: 必须指定 -f 或 -i 参数之一[/red]")
+        console.print("[yellow]💡 提示:[/yellow]")
+        console.print(f"[dim]   refresh {symbol} -f ./data/latest -c {cache}[/dim]")
+        console.print(f"[dim]   refresh {symbol} -i ./data/input/{symbol.lower()}_datetime.json -c {cache}[/dim]")
+        sys.exit(1)
     
     console.print(f"\n[bold magenta]📸 Swing Quant - 刷新快照 {symbol}[/bold magenta]")
     
@@ -420,6 +627,7 @@ def refresh(symbol: str, folder: str, cache: str, model_config: str):
         command.execute(
             symbol=symbol,
             folder=folder,
+            input_file=input_file,  # 新增：传递输入文件参数
             cache=cache,
             market_params=market_params,
             dyn_params=dyn_params

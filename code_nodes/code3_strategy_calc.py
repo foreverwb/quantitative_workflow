@@ -234,7 +234,8 @@ class StrategyCalculator:
         adj = max(c.min, min(c.max, final))
         return WinProbResult(estimate=round(adj, 3), theoretical_base=theoretical, formula="Hybrid", note="Credit")
 
-    def _calc_pw_debit(self, dex_pct: float, vanna_conf: str, gap_em1: float, iv: float, dte: int) -> WinProbResult:
+    def _calc_pw_debit(self, iv: float, dte: int) -> WinProbResult:
+        """计算Debit策略胜率"""
         e = self.conf.pw_calculation.debit
         theoretical = self._calc_theoretical_win_rate('debit', iv, dte)
         final = (e.base * 0.7) + (theoretical * 0.3)
@@ -304,9 +305,7 @@ class StrategyCalculator:
         
         pw_credit = self._calc_pw_credit(gamma.get("cluster_strength_ratio", 1.5),
                                           gamma.get("gap_distance_em1_multiple", 2.0), technical_score, iv_atm, dte.final)
-        pw_debit = self._calc_pw_debit(direction.get("dex_same_dir_pct", 0.5),
-                                        direction.get("vanna_confidence", "medium"),
-                                        gamma.get("gap_distance_em1_multiple", 2.0), iv_atm, dte.final)
+        pw_debit = self._calc_pw_debit(iv_atm, dte.final)
         pw_butterfly = self._calc_pw_butterfly(spot, spot, em1, direction.get("iv_path", "平"))
         
         return {

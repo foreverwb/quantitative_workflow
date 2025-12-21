@@ -32,13 +32,9 @@ gamma:
   lambda_ivr_floor: 30.0         # IVR 低波防爆阈值
 
 # ======================================
-# 2. 方向信号阈值
+# 2. 方向信号配置
 # ======================================
 direction:
-  # DEX 同向阈值
-  dex_same_dir_threshold_strong: 70  # ≥70% 强方向
-  dex_same_dir_threshold_medium: 60  # ≥60% 中等方向
-  dex_same_dir_threshold_weak: 50    # ≥50% 弱方向
   
   # IV 路径阈值
   iv_path_threshold_vol: 2           # 绝对变化 ≥ 2 vol点

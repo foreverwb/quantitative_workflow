@@ -238,7 +238,7 @@ class FieldCalculator:
         return k_sys, k_idiosync
     
     def validate_raw_fields(self, data: Dict) -> Dict:
-        """验证原始字段完整性（26个，含 validation_metrics 3个）"""
+        """验证原始字段完整性（25个，含 validation_metrics 2个）"""
         targets = data.get('targets', {})
         
         if isinstance(targets, str):
@@ -257,13 +257,13 @@ class FieldCalculator:
         if not self._is_valid_value(targets.get('spot_price')):
             missing_fields.append({"field": "spot_price", "path": "spot_price"})
         
-        # 2. walls (4个)
+        # 2. walls (3个)
         walls = targets.get('walls', {})
         for field in ["call_wall", "put_wall", "major_wall"]:
             if not self._is_valid_value(walls.get(field)):
                 missing_fields.append({"field": field, "path": f"walls.{field}"})
         
-        # 3. gamma_metrics (11个)
+        # 3. gamma_metrics (8个)
         gamma_metrics = targets.get('gamma_metrics', {})
         gamma_fields = ["vol_trigger", "spot_vs_trigger", "net_gex", 
                        "gap_distance_dollar"]
@@ -271,21 +271,10 @@ class FieldCalculator:
             if not self._is_valid_value(gamma_metrics.get(field)):
                 missing_fields.append({"field": field, "path": f"gamma_metrics.{field}"})
         
-        # nearby_peak
-        nearby_peak = gamma_metrics.get('nearby_peak', {})
-        for field in ["price", "abs_gex"]:
-            if not self._is_valid_value(nearby_peak.get(field)):
-                missing_fields.append({"field": f"nearby_peak_{field}", "path": f"gamma_metrics.nearby_peak.{field}"})
         
-        # next_cluster_peak
-        next_cluster_peak = gamma_metrics.get('next_cluster_peak', {})
-        for field in ["price", "abs_gex"]:
-            if not self._is_valid_value(next_cluster_peak.get(field)):
-                missing_fields.append({"field": f"next_cluster_peak_{field}", "path": f"gamma_metrics.next_cluster_peak.{field}"})
-        
-        # 4. directional_metrics (5个)
+        # 4. directional_metrics (6个)
         directional_metrics = targets.get('directional_metrics', {})
-        directional_fields = ["dex_same_dir_pct", "vanna_dir", "vanna_confidence", 
+        directional_fields = ["dex_bias", "dex_bias_strength", "vanna_dir", "vanna_confidence", 
                             "iv_path", "iv_path_confidence"]
         for field in directional_fields:
             if not self._is_valid_value(directional_metrics.get(field)):
@@ -297,42 +286,29 @@ class FieldCalculator:
             if not self._is_valid_value(atm_iv.get(field)):
                 missing_fields.append({"field": field, "path": f"atm_iv.{field}"})
         
-        # 6. validation_metrics (2个) - 允许 null，但需要记录
+        # 6. validation_metrics (2个) - 允许缺失，但需要记录
         validation_metrics = targets.get('validation_metrics', {})
         validation_fields = ["net_volume_signal", "net_vega_exposure"]
-        validation_missing = []
         for field in validation_fields:
             value = validation_metrics.get(field)
-            # validation_metrics 允许 null，但如果整个对象不存在则记录
             if validation_metrics and value is None:
-                validation_missing.append({"field": field, "path": f"validation_metrics.{field}", "severity": "high"})
+                missing_fields.append({"field": field, "path": f"validation_metrics.{field}", "severity": "low"})
         
-        # 核心字段总数（不含 validation_metrics）
-        core_required = 23
-        core_provided = core_required - len(missing_fields)
-        
-        # 含 validation_metrics 的总数
-        total_required = 25
-        total_missing = len(missing_fields) + len(validation_missing)
-        total_provided = total_required - total_missing
-        
-        # 注入 Sanity 结果
+        # 注入 Sanity 错误到 missing_fields
         if not is_sane:
             for err in sanity_errors:
                 missing_fields.append({"field": "SANITY_CHECK", "path": "root", "reason": err, "severity": "critical"})
         
+        # 计算统计
+        total_required = 25
+        provided = total_required - len(missing_fields)
+        
         return {
-            "is_complete": len(missing_fields) == 0,  # 核心字段完整即可
+            "is_complete": is_sane and len([f for f in missing_fields if f.get("severity") != "low"]) == 0,
             "missing_fields": missing_fields,
-            "validation_missing": validation_missing,  # 单独记录验证字段缺失
             "total_required": total_required,
-            "core_required": core_required,
-            "provided": total_provided,
-            "core_provided": core_provided,
-            "completion_rate": int((core_provided / core_required) * 100),
-            "validation_rate": int(((3 - len(validation_missing)) / 3) * 100) if validation_metrics else 0,
-            "sanity_passed": is_sane,
-            "sanity_errors": sanity_errors
+            "provided": provided,
+            "completion_rate": int((provided / total_required) * 100)
         }
     
     def calculate_all(self, data: Dict) -> Dict:
@@ -351,10 +327,7 @@ class FieldCalculator:
         targets = self._calculate_gap_distance_em1(targets)
         
         # 计算 cluster_strength_ratio
-        targets = self._calculate_cluster_strength_ratio(targets)
-        
-        # 计算 monthly_cluster_override
-        targets = self._calculate_monthly_cluster_override(targets)
+        # targets = self._calculate_cluster_strength_ratio(targets)
         
         # 计算指数 EM1$
         targets = self._calculate_indices_em1(targets)
@@ -612,35 +585,6 @@ class FieldCalculator:
         
         return targets
     
-    def _calculate_monthly_cluster_override(self, targets: Dict) -> Dict:
-        """计算 monthly_cluster_override"""
-        gamma_metrics = targets.get('gamma_metrics', {})
-        weekly_data = gamma_metrics.get('weekly_data', {})
-        monthly_data = gamma_metrics.get('monthly_data', {})
-        
-        weekly_cluster_strength = weekly_data.get('cluster_strength', {})
-        monthly_cluster_strength = monthly_data.get('cluster_strength', {})
-        
-        w_cluster_strength_gex = weekly_cluster_strength.get('abs_gex')
-        m_cluster_strength_gex = monthly_cluster_strength.get('abs_gex')
-        
-        if not w_cluster_strength_gex or not m_cluster_strength_gex:
-            print("⚠️ monthly_cluster_override 计算缺失输入")
-            if 'gamma_metrics' not in targets:
-                targets['gamma_metrics'] = {}
-            targets['gamma_metrics']['monthly_cluster_override'] = False
-            return targets
-        
-        # 从配置对象读取
-        ratio_threshold = self.gamma_config.monthly_cluster_strength_ratio
-        override = (m_cluster_strength_gex / w_cluster_strength_gex >= ratio_threshold)
-        
-        targets['gamma_metrics']['monthly_cluster_override'] = override
-        
-        print(f"✅ monthly_cluster_override: {m_cluster_strength_gex:.1f} / {w_cluster_strength_gex:.1f} >= {ratio_threshold:.2f} → {override}")
-        
-        return targets
-    
     def _calculate_indices_em1(self, data: Dict) -> Dict:
         """计算所有指数的 EM1$"""
         indices = data.get('indices', {})
@@ -782,33 +726,36 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         print(f"\n📊 验证结果:")
         print(f"  • 完成率: {validation['completion_rate']}%")
         print(f"  • 提供字段: {validation['provided']}/{validation['total_required']}")
-        print(f"  • 核心缺失: {len(validation['missing_fields'])}")
-        print(f"  • 验证缺失: {len(validation.get('validation_missing', []))}")
+        print(f"  • 缺失字段: {len(validation['missing_fields'])}")
         
         # 输出具体缺失的字段名称
         if validation['missing_fields']:
-            print(f"\n❌ 核心缺失字段:")
-            for item in validation['missing_fields']:
-                field_name = item.get('field', 'unknown')
-                field_path = item.get('path', 'unknown')
-                reason = item.get('reason', '')
-                if reason:
-                    print(f"    • {field_path} ({reason})")
-                else:
-                    print(f"    • {field_path}")
-        
-        if validation.get('validation_missing'):
-            print(f"\n⚠️ 验证字段缺失:")
-            for item in validation['validation_missing']:
-                field_path = item.get('path', 'unknown')
-                severity = item.get('severity', 'unknown')
-                print(f"    • {field_path} [severity: {severity}]")
+            # 分类：critical/normal/low
+            critical = [f for f in validation['missing_fields'] if f.get('severity') == 'critical']
+            normal = [f for f in validation['missing_fields'] if f.get('severity') not in ('critical', 'low')]
+            low = [f for f in validation['missing_fields'] if f.get('severity') == 'low']
+            
+            if critical:
+                print(f"\n🚨 严重问题:")
+                for item in critical:
+                    reason = item.get('reason', '')
+                    print(f"    • {item.get('path', 'unknown')} ({reason})")
+            
+            if normal:
+                print(f"\n❌ 核心缺失字段:")
+                for item in normal:
+                    print(f"    • {item.get('path', 'unknown')}")
+            
+            if low:
+                print(f"\n⚠️ 可选字段缺失:")
+                for item in low:
+                    print(f"    • {item.get('path', 'unknown')}")
         
         if not validation["is_complete"]:
-            print(f"\n❌ 数据不完整，核心缺失 {len(validation['missing_fields'])} 个字段")
+            core_missing = len([f for f in validation['missing_fields'] if f.get('severity') != 'low'])
+            print(f"\n❌ 数据不完整，核心缺失 {core_missing} 个字段")
             
             result = {
-                "status": "incomplete",
                 "data_status": "awaiting_data",
                 "validation": validation,
                 "targets": data.get("targets"),
@@ -826,7 +773,6 @@ def main(aggregated_data: dict, symbol: str, **env_vars) -> dict:
         print(">>" * 80)
         
         result = {
-            "status": "complete",
             "data_status": "ready",
             "validation": validation,
             "symbol": symbol,

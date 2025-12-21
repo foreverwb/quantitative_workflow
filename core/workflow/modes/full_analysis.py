@@ -9,7 +9,7 @@ from loguru import logger
 
 import prompts
 import schemas
-from code_nodes import aggregator_main, calculator_main
+from code_nodes import calculator_main
 from code_nodes.runtime_label_builder import RuntimeLabelBuilder
 from .base import BaseMode
 from ..pipeline import AnalysisPipeline
@@ -66,20 +66,15 @@ class FullAnalysisMode(BaseMode):
                     context={"response": agent3_result}
                 )
             
-            # 3. 数据聚合
-            error_handler.add_completed_step("开始 Aggregator")
-            aggregated_result = self._run_aggregator(agent3_result, symbol)
-            error_handler.add_completed_step("完成 Aggregator")
-            
-            # 4. 字段计算 & 验证
+            # 3. 字段计算 & 验证（直接使用 Agent3 输出）
             error_handler.add_completed_step("开始 Calculator")
-            calculated_result = self._run_calculator(aggregated_result, symbol)
+            calculated_result = self._run_calculator(agent3_result, symbol)
             error_handler.add_completed_step("完成 Calculator")
             
-            # 5. 解析结果
+            # 4. 解析结果
             data_status = calculated_result.get("data_status")
             
-            # 6. 判断状态
+            # 5. 判断状态
             if data_status == "awaiting_data":
                 logger.warning(f"⚠️ 数据缺失，生成补齐指引（非错误）")
                 return {
@@ -263,34 +258,13 @@ class FullAnalysisMode(BaseMode):
         logger.success("✅ Agent3 数据处理完成")
         return normalized_data
     
-    def _run_aggregator(self, agent3_result: Dict, symbol: str) -> Dict[str, Any]:
-        """
-        运行数据聚合器
-        
-        Args:
-            agent3_result: Agent3 结果
-            state: 当前状态
-            
-        Returns:
-            聚合结果
-        """
-        logger.info("📦 [Aggregator] 数据聚合")
-        
-        result = self.agent_executor.execute_code_node(
-            node_name="Aggregator",
-            func=aggregator_main,
-            agent3_output=agent3_result,
-            symbol=symbol,
-            **self.env_vars
-        )
-        return result
-    
     def _run_calculator(self, agent3_result: Dict, symbol: str) -> Dict[str, Any]:
         """
         运行字段计算器
         
         Args:
-            data: 聚合后的数据
+            agent3_result: Agent3 规范化后的结果
+            symbol: 股票代码
             
         Returns:
             计算后的数据
@@ -299,7 +273,7 @@ class FullAnalysisMode(BaseMode):
         result = self.agent_executor.execute_code_node(
             node_name="Calculator",
             func=calculator_main,
-            aggregated_data=agent3_result,
+            aggregated_data=agent3_result,  # Calculator 期望的参数名
             symbol=symbol,
             **self.env_vars
         )
@@ -348,7 +322,7 @@ class FullAnalysisMode(BaseMode):
     
     def _run_full_pipeline(
         self, 
-        aggregated_result: Dict, 
+        calculated_result: Dict, 
         error_handler: ErrorHandler,
         market_params: Dict = None, 
         dyn_params: Dict = None
@@ -357,7 +331,10 @@ class FullAnalysisMode(BaseMode):
         运行完整分析流程
         
         Args:
-            aggregated_result: 聚合结果
+            calculated_result: Calculator 计算后的结果
+            error_handler: 错误处理器
+            market_params: 市场参数
+            dyn_params: 动态参数
             
         Returns:
             完整分析结果
@@ -375,7 +352,7 @@ class FullAnalysisMode(BaseMode):
             dyn_params=dyn_params
         )
         
-        result = pipeline.run(aggregated_result)
+        result = pipeline.run(calculated_result)
         
         logger.success("✅ 完整分析流程完成")
         

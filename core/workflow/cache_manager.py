@@ -833,3 +833,64 @@ class CacheManager:
         except Exception as e:
             logger.error(f"加载市场参数失败: {e}")
             return None
+    
+    def update_source_target_data(
+        self, 
+        symbol: str, 
+        cache_file: str, 
+        agent3_like_data: Dict[str, Any]
+    ) -> bool:
+        """
+        更新缓存文件的 source_target.data 字段
+        
+        用于 -i 模式：将 input JSON 数据写入缓存，保持与 -f 模式数据结构一致
+        
+        Args:
+            symbol: 股票代码
+            cache_file: 缓存文件名（如 AAPL_20251215.json）
+            agent3_like_data: 与 Agent3 输出格式一致的数据
+                {
+                    "targets": {...},
+                    "indices": {...}
+                }
+        
+        Returns:
+            是否更新成功
+        """
+        # 从文件名提取日期
+        match = re.match(r'(\w+)_(\d{8})\.json', cache_file)
+        if not match:
+            logger.error(f"无效的缓存文件名格式: {cache_file}")
+            return False
+        
+        start_date = match.group(2)
+        cache_path = self.output_dir / symbol / start_date / cache_file
+        
+        if not cache_path.exists():
+            logger.error(f"缓存文件不存在: {cache_path}")
+            return False
+        
+        try:
+            # 加载现有缓存
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                cached = json.load(f)
+            
+            # 初始化或更新 source_target
+            if "source_target" not in cached:
+                cached["source_target"] = {}
+            
+            cached["source_target"]["data"] = agent3_like_data
+            cached["source_target"]["timestamp"] = datetime.now().isoformat()
+            cached["source_target"]["source"] = "input_file"  # 标记数据来源
+            cached["last_updated"] = datetime.now().isoformat()
+            
+            # 保存
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(cached, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"✅ source_target.data 已更新: {cache_path}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"更新 source_target.data 失败: {e}")
+            return False

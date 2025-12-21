@@ -119,15 +119,28 @@ class DriftEngine:
                 report["changes"].append("收复 Vol Trigger，回归正Gamma区")
 
     def _check_dex_momentum(self, last: Dict, curr: Dict, spot: float, report: Dict):
-        """监控 DEX 动能背离"""
-        l_dex = last.get("directional_metrics", {}).get("dex_same_dir_pct", 0)
-        c_dex = curr.get("directional_metrics", {}).get("dex_same_dir_pct", 0)
+        """监控 DEX 动能变化"""
+        l_bias = last.get("directional_metrics", {}).get("dex_bias", "mixed")
+        c_bias = curr.get("directional_metrics", {}).get("dex_bias", "mixed")
+        l_strength = last.get("directional_metrics", {}).get("dex_bias_strength", "weak")
+        c_strength = curr.get("directional_metrics", {}).get("dex_bias_strength", "weak")
         price_chg = (spot - last.get("spot_price", spot)) / spot
         
-        # 价格涨 但 DEX 跌 -> 背离
-        if price_chg > 0.005 and (c_dex - l_dex) < self.THRESHOLDS["DEX_DIVERGENCE"]:
-            report["alerts"].append(f"📉 DEX 动能背离 (价涨量缩)")
+        # 从 support 变为 oppose → 背离警告
+        if l_bias == "support" and c_bias == "oppose":
+            report["alerts"].append(f"📉 DEX 动能翻转 (从支持变为反向)")
+            report["actions"].append({"type": "tighten_stop", "side": "long", "reason": "Dealer库存方向反转"})
+        
+        # 价格涨 但 DEX 从 support 变为 mixed → 弱化警告
+        elif price_chg > 0.005 and l_bias == "support" and c_bias == "mixed":
+            report["alerts"].append(f"📉 DEX 动能弱化 (价涨但信号混合)")
             report["actions"].append({"type": "tighten_stop", "side": "long", "reason": "上涨缺乏Dealer库存支持"})
+        
+        # 强度下降警告
+        strength_order = {"strong": 3, "mid": 2, "weak": 1}
+        if l_bias == "support" and c_bias == "support":
+            if strength_order.get(l_strength, 0) > strength_order.get(c_strength, 0):
+                report["changes"].append(f"DEX支持强度减弱 ({l_strength} → {c_strength})")
 
     def _check_iv_flow(self, last: Dict, curr: Dict, report: Dict):
         """监控 IV 异常跳升"""

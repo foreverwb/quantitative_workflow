@@ -82,7 +82,8 @@ class RefreshMode(FullAnalysisMode):
             # 7. 终端展示
             self._print_monitoring_dashboard(drift_report)
             if html_result.get("status") == "success":
-                logger.success(f"📄 监控仪表盘已更新: {html_result['html_path']}")
+                from utils.console_printer import print_report_link
+                print_report_link(html_result['html_path'], symbol)
             
             return {
                 "status": "success", 

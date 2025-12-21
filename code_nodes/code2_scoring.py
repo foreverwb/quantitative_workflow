@@ -184,7 +184,17 @@ class OptionsScoring:
         }
     
     def calculate_direction_score(self, directional_metrics: Dict) -> Dict:
-        dex_same_dir = directional_metrics.get('dex_same_dir_pct', 0)
+        """
+        计算方向评分
+        
+        DEX评分规则：
+        - dex_bias=support + dex_bias_strength=strong → 强方向 (9分)
+        - dex_bias=support + dex_bias_strength=mid → 中等方向 (6分)
+        - dex_bias=mixed → 模糊 (5分)
+        - dex_bias=oppose → 弱方向 (3分)
+        """
+        dex_bias = directional_metrics.get('dex_bias', 'mixed')
+        dex_strength = directional_metrics.get('dex_bias_strength', 'weak')
         vanna_dir = directional_metrics.get('vanna_dir', 'neutral')
         vanna_confidence = directional_metrics.get('vanna_confidence', 'low')
         pw_debit = self.pw_config.get('debit')
@@ -196,40 +206,53 @@ class OptionsScoring:
         }
         vanna_weight = vanna_weight_map.get(vanna_confidence, 0.3)
         
-        has_strong_dex = dex_same_dir >= self.env_dir.dex_same_dir_threshold_strong
+        # DEX方向评估
+        has_strong_dex = (dex_bias == 'support' and dex_strength == 'strong')
+        has_medium_dex = (dex_bias == 'support' and dex_strength == 'mid')
+        has_mixed_dex = (dex_bias == 'mixed')
+        has_oppose_dex = (dex_bias == 'oppose')
+        
         has_clear_vanna = vanna_dir in ['up', 'down']
         has_medium_vanna = vanna_weight >= pw_debit.vanna_weight_medium
         
+        # 评分逻辑
         if has_strong_dex and has_clear_vanna and has_medium_vanna:
             direction_strength = "强方向信号"
             score = 9
-            strength_desc = "DEX强+Vanna高置信"
-        elif dex_same_dir >= self.env_dir.dex_same_dir_threshold_medium or vanna_weight == pw_debit.vanna_weight_medium:
+            strength_desc = "DEX强支持+Vanna高置信"
+        elif has_medium_dex or vanna_weight == pw_debit.vanna_weight_medium:
             direction_strength = "中等方向信号"
             score = 6
-            strength_desc = "DEX中等或Vanna中等置信"
-        elif dex_same_dir < self.env_dir.dex_same_dir_threshold_weak or vanna_confidence == 'low':
+            strength_desc = "DEX中等支持或Vanna中等置信"
+        elif has_mixed_dex:
+            direction_strength = "模糊信号"
+            score = 5
+            strength_desc = "DEX混合信号"
+        elif has_oppose_dex or vanna_confidence == 'low':
             direction_strength = "弱方向信号"
             score = 3
-            strength_desc = "DEX弱或Vanna低置信"
+            strength_desc = "DEX反向或Vanna低置信"
         else:
             direction_strength = "中等偏弱信号"
             score = 5
             strength_desc = "信号模糊"
         
-        if dex_same_dir >= self.env_dir.dex_same_dir_threshold_strong:
-            dex_eval = "强"
-        elif dex_same_dir >= self.env_dir.dex_same_dir_threshold_medium:
-            dex_eval = "中等"
+        # DEX评估文本
+        if has_strong_dex:
+            dex_eval = "强支持"
+        elif has_medium_dex:
+            dex_eval = "中等支持"
+        elif has_mixed_dex:
+            dex_eval = "混合"
         else:
-            dex_eval = "弱"
+            dex_eval = "反向"
         
         direction_note = (
-            f"DEX同向{dex_same_dir:.1f}%({dex_eval})，"
+            f"DEX偏向{dex_bias}/{dex_strength}({dex_eval})，"
             f"Vanna方向{vanna_dir}且置信度{vanna_confidence}权重{vanna_weight:.1f}，"
             f"综合{direction_strength}"
         )
-        rationale = f"dex {dex_same_dir:.1f}%+vanna {vanna_confidence}({strength_desc})综合给{score}分"
+        rationale = f"dex {dex_bias}/{dex_strength}+vanna {vanna_confidence}({strength_desc})综合给{score}分"
         
         return {
             "score": score,
@@ -237,7 +260,8 @@ class OptionsScoring:
             "vanna_weight": vanna_weight,
             "direction_note": direction_note,
             "rationale": rationale,
-            "dex_same_dir": dex_same_dir,
+            "dex_bias": dex_bias,
+            "dex_bias_strength": dex_strength,
             "vanna_dir": vanna_dir,
             "vanna_confidence": vanna_confidence
         }
@@ -311,7 +335,7 @@ class OptionsScoring:
         stock_spot_vs_trigger = gamma_metrics.get('spot_vs_trigger', '')
         stock_gap_distance = gamma_metrics.get('gap_distance_dollar', 0)
         stock_iv_path = directional_metrics.get('iv_path', '平')
-        stock_dex_same_dir = directional_metrics.get('dex_same_dir_pct', 0.5)
+        stock_dex_bias = directional_metrics.get('dex_bias', 'mixed')
         
         if idx_net_gex == 'positive_gamma' and stock_spot_vs_trigger == 'above':
             if stock_iv_path in ['平', '降']:
@@ -338,9 +362,9 @@ class OptionsScoring:
             else:
                 consistency_note.append(f"{primary_symbol}负γ但EM1_idx缺失")
         
-        if idx_net_gex == 'negative_gamma' and stock_dex_same_dir < 0.5:
+        if idx_net_gex == 'negative_gamma' and stock_dex_bias == 'oppose':
             adjustment += conflict_penalty
-            consistency_note.append(f"⚠️ {primary_symbol}负γ趋势强，但个股DEX同向{stock_dex_same_dir*100:.1f}%冲突")
+            consistency_note.append(f"⚠️ {primary_symbol}负γ趋势强，但个股DEX反向信号冲突")
         
         if idx_net_gex == 'positive_gamma' and stock_spot_vs_trigger == 'below':
             if idx_em1 > 0 and stock_gap_distance > idx_em1:
@@ -439,12 +463,13 @@ class OptionsScoring:
         else:
             conditions_failed.append(f"条件2: gap_distance_em1={gap:.2f}≥2偏大")
         
-        dex = directional.get('dex_same_dir_pct', 0)
-        dex_threshold = self.env_dir.dex_same_dir_threshold_medium
-        if dex >= dex_threshold:
-            conditions_met.append(f"条件3: dex_same_dir={dex:.1f}≥{dex_threshold:.0f}%")
+        dex_bias = directional.get('dex_bias', 'mixed')
+        dex_strength = directional.get('dex_bias_strength', 'weak')
+        # DEX支持条件：bias=support 且 strength 不为 weak
+        if dex_bias == 'support' and dex_strength in ['strong', 'mid']:
+            conditions_met.append(f"条件3: dex_bias={dex_bias}/{dex_strength}支持")
         else:
-            conditions_failed.append(f"条件3: dex_same_dir={dex:.1f}<{dex_threshold:.0f}%")
+            conditions_failed.append(f"条件3: dex_bias={dex_bias}/{dex_strength}不支持")
         
         vanna_conf = directional.get('vanna_confidence', 'low')
         if vanna_conf in ['high', 'medium']:
@@ -567,7 +592,8 @@ class OptionsScoring:
                 "break_note": break_wall_result['break_note']
             },
             "directional_signals": {
-                "dex_same_dir": direction_result['dex_same_dir'],
+                "dex_bias": direction_result['dex_bias'],
+                "dex_bias_strength": direction_result['dex_bias_strength'],
                 "vanna_dir": direction_result['vanna_dir'],
                 "vanna_confidence": direction_result['vanna_confidence'],
                 "vanna_weight": direction_result['vanna_weight'],

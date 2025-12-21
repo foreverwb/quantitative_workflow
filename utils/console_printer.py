@@ -553,6 +553,10 @@ def print_report_link(html_path: str, symbol: str = ""):
     else:  # macOS / Linux
         file_url = f"file://{abs_path}"
     
+    # 生成可点击的终端链接 (使用 OSC 8 超链接转义序列)
+    # 格式: \033]8;;URL\033\\显示文本\033]8;;\033\\
+    clickable_link = f"\033]8;;{file_url}\033\\{file_url}\033]8;;\033\\"
+    
     # 打印分隔线和链接
     print()
     printer._print_separator('═', 80, 'bright_green')
@@ -561,7 +565,7 @@ def print_report_link(html_path: str, symbol: str = ""):
     print()
     print(printer._colorize(f"  📊 {symbol} 策略分析报告", 'bright_cyan'))
     print()
-    print(printer._colorize(f"  📁 文件路径: {abs_path}", 'dim'))
+    print(f" Link : {clickable_link}")
     print()
     printer._print_separator('═', 80, 'bright_green')
     print()

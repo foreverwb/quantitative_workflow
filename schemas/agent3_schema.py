@@ -72,7 +72,6 @@ def get_schema() -> dict:
                             "vol_trigger",
                             "spot_vs_trigger",
                             "net_gex",
-                            "abs_gex_peaks",
                             "gap_distance_dollar"
                         ],
                         "properties": {
@@ -102,61 +101,6 @@ def get_schema() -> dict:
                             },
                             
                             "gap_distance_dollar": {"type": "number"},
-                            
-                            # 保留旧结构兼容
-                            "nearby_peak": {
-                                "type": "object",
-                                "required": ["price", "abs_gex"],
-                                "properties": {
-                                    "price": {"type": "number"},
-                                    "abs_gex": {"type": "number"}
-                                },
-                                "additionalProperties": False
-                            },
-                            
-                            "next_cluster_peak": {
-                                "type": "object",
-                                "required": ["price", "abs_gex"],
-                                "properties": {
-                                    "price": {"type": "number"},
-                                    "abs_gex": {"type": "number"}
-                                },
-                                "additionalProperties": False
-                            },
-                            
-                            "monthly_data": {
-                                "type": "object",
-                                "required": ["cluster_strength"],
-                                "properties": {
-                                    "cluster_strength": {
-                                        "type": "object",
-                                        "required": ["price", "abs_gex"],
-                                        "properties": {
-                                            "price": {"type": "number"},
-                                            "abs_gex": {"type": "number"}
-                                        },
-                                        "additionalProperties": False
-                                    }
-                                },
-                                "additionalProperties": False
-                            },
-                            
-                            "weekly_data": {
-                                "type": "object",
-                                "required": ["cluster_strength"],
-                                "properties": {
-                                    "cluster_strength": {
-                                        "type": "object",
-                                        "required": ["price", "abs_gex"],
-                                        "properties": {
-                                            "price": {"type": "number"},
-                                            "abs_gex": {"type": "number"}
-                                        },
-                                        "additionalProperties": False
-                                    }
-                                },
-                                "additionalProperties": False
-                            }
                         },
                         "additionalProperties": False
                     },
@@ -167,14 +111,24 @@ def get_schema() -> dict:
                     "directional_metrics": {
                         "type": "object",
                         "required": [
-                            "dex_same_dir_pct",
+                            "dex_bias",
+                            "dex_bias_strength",
                             "vanna_dir",
                             "vanna_confidence",
                             "iv_path",
                             "iv_path_confidence"
                         ],
                         "properties": {
-                            "dex_same_dir_pct": {"type": "number"},
+                            "dex_bias": {
+                                "type": "string",
+                                "enum": ["support", "mixed", "oppose"],
+                                "description": "DEX方向偏好：support=支持当前趋势, mixed=混合信号, oppose=反向信号"
+                            },
+                            "dex_bias_strength": {
+                                "type": "string",
+                                "enum": ["strong", "mid", "weak"],
+                                "description": "DEX信号强度"
+                            },
                             "vanna_dir": {
                                 "type": "string",
                                 "enum": ["up", "down", "flat", "N/A"]
