@@ -10,16 +10,8 @@ def get_schema() -> dict:
     """返回 Agent 3 的 JSON Schema"""
     return {
         "type": "object",
-        "required": ["timestamp", "targets", "indices"],
+        "required": ["targets", "indices"],
         "properties": {
-            # ============================================
-            # 1. 时间戳
-            # ============================================
-            "timestamp": {
-                "type": "string",
-                "description": "数据提取时间戳（ISO 8601 格式）"
-            },
-            
             # ============================================
             # 2. 标的数据
             # ============================================
