@@ -77,21 +77,6 @@ def get_schema() -> dict:
                                 "enum": ["positive_gamma", "negative_gamma"]
                             },
                             
-                            # 新增: peaks 数组
-                            "abs_gex_peaks": {
-                                "type": "array",
-                                "description": "ABS GEX 峰值列表",
-                                "items": {
-                                    "type": "object",
-                                    "required": ["price", "abs_gex"],
-                                    "properties": {
-                                        "price": {"type": "number"},
-                                        "abs_gex": {"type": "number"}
-                                    },
-                                    "additionalProperties": False
-                                }
-                            },
-                            
                             "gap_distance_dollar": {"type": "number"},
                         },
                         "additionalProperties": False

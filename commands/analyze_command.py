@@ -3,7 +3,9 @@ Analyze 命令处理器 - 集成市场状态计算
 """
 
 import sys
+import json
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, Any
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -17,7 +19,6 @@ from code_nodes.code0_cmdlist import CommandListGenerator
 from utils.console_printer import print_error_summary
 
 
-
 class AnalyzeCommand(BaseCommand):
     """Analyze 命令处理器（扩展版）"""
     
@@ -28,7 +29,7 @@ class AnalyzeCommand(BaseCommand):
         output: str = None,
         mode: str = 'full',
         cache: str = None,
-        **kwargs  # 接收额外参数（包括 market_params, dyn_params, tag）
+        **kwargs
     ) -> Dict[str, Any]:
         """
         执行分析命令
@@ -53,31 +54,25 @@ class AnalyzeCommand(BaseCommand):
         
         # 2. 提取市场参数
         market_params = kwargs.get('market_params')
-        dyn_params = kwargs.get('dyn_params')  #  从缓存加载的动态参数
-        tag = kwargs.get('tag')  # 工作流标识
+        dyn_params = kwargs.get('dyn_params')
+        tag = kwargs.get('tag')
         
         # 3. 判断模式
         if not folder:
             # ========== 模式A: 生成命令清单（Agent2）==========
-            # 必须有市场参数
             if not market_params:
                 self.print_error("生成命令清单时必须指定市场参数 (--vix, --ivr, --iv30, --hv20)")
                 sys.exit(1)
             
             try:
-                # 验证参数合法性
                 MarketStateCalculator.validate_params(market_params)
-                
-                # 计算动态参数
                 pre_calc_params = MarketStateCalculator.calculate_fetch_params(
                     vix=market_params['vix'],
                     ivr=market_params['ivr'],
                     iv30=market_params['iv30'],
                     hv20=market_params['hv20']
                 )
-                
                 logger.info(f"✅ 市场状态计算完成: {pre_calc_params['scenario']}")
-                
             except ValueError as e:
                 self.print_error(f"市场参数验证失败: {e}")
                 sys.exit(1)
@@ -86,13 +81,10 @@ class AnalyzeCommand(BaseCommand):
         
         else:
             # ========== 模式B: 完整分析（Agent3 → Pipeline）==========
-            # 优先使用从缓存加载的动态参数
             if dyn_params:
-                # 从缓存加载的参数
                 pre_calc_params = dyn_params
                 logger.info(f"✅ 使用缓存中的动态参数: {pre_calc_params.get('scenario', 'N/A')}")
             elif market_params:
-                # 如果用户显式提供了市场参数，重新计算（兼容旧用法）
                 try:
                     MarketStateCalculator.validate_params(market_params)
                     pre_calc_params = MarketStateCalculator.calculate_fetch_params(
@@ -116,7 +108,7 @@ class AnalyzeCommand(BaseCommand):
                 mode=mode,
                 cache=cache,
                 pre_calc=pre_calc_params,
-                market_params=market_params  #  传递市场参数用于保存
+                market_params=market_params
             )
     
     def _generate_command_list(self, symbol: str, pre_calc: Dict, tag: str = None) -> Dict[str, Any]:
@@ -137,7 +129,6 @@ class AnalyzeCommand(BaseCommand):
         
         self.console.print("\n[yellow]📁 加载配置...[/yellow]")
         
-        # 获取市场参数
         market_params = self.env_vars.get('market_params', {})
         
         self.console.print(f"\n[green]🚀 开始生成 {symbol.upper()} 的动态命令清单[/green]\n")
@@ -150,7 +141,6 @@ class AnalyzeCommand(BaseCommand):
             ) as progress:
                 task = progress.add_task("正在生成命令清单...", total=None)
                 
-                # 使用 Code Node 替代 Agent 调用
                 generator = CommandListGenerator()
                 result = generator.generate(
                     symbol=symbol.upper(),
@@ -170,6 +160,14 @@ class AnalyzeCommand(BaseCommand):
                 title=f"📋 {symbol.upper()} 数据抓取命令清单 (基于 {pre_calc['scenario']})",
                 border_style="green"
             ))
+            
+            # ========== 新增: 生成输入文件模板 ==========
+            self.console.print("\n[yellow]📝 生成输入文件模板...[/yellow]")
+            template_path = self._generate_input_template(symbol, pre_calc, market_params)
+            if template_path:
+                self.console.print(f"[green]✅ 模板已生成: {template_path}[/green]")
+                self.console.print(f"[dim]   请填充数据后使用 'refresh' 命令[/dim]")
+            
             self.console.print("\n[yellow]💾 初始化缓存文件...[/yellow]")
             cache_manager = CacheManager()
         
@@ -177,10 +175,9 @@ class AnalyzeCommand(BaseCommand):
                 symbol=symbol.upper(),
                 market_params=market_params,
                 dyn_params=pre_calc,
-                tag=tag  # 传递 tag 参数到缓存管理器
+                tag=tag
             )
             if cache_path:
-                # 提取文件名
                 cache_filename = Path(cache_path).name
                 
                 self.console.print(f"[green]✅ 缓存已创建: {cache_path}[/green]")
@@ -188,7 +185,6 @@ class AnalyzeCommand(BaseCommand):
                     self.console.print(f"[dim]   工作流标识: tag={tag}[/dim]")
                 self.console.print(f"[dim]   后续分析将自动从此文件读取市场参数[/dim]")
                 
-                #  简化的命令提示（根据 tag 显示不同的命令）
                 self.console.print(f"\n[yellow]💡 提示：抓取数据后，请使用以下命令执行分析:[/yellow]")
                 if tag == 'Meso':
                     self.console.print(
@@ -212,12 +208,134 @@ class AnalyzeCommand(BaseCommand):
                 "pre_calc": pre_calc,
                 "cache_path": str(cache_path) if cache_path else None,
                 "tag": tag,
-                "summary": summary  # 新增：命令统计
+                "summary": summary,
+                "template_path": template_path
             }
         
         except Exception as e:
             self.print_error(str(e))
             sys.exit(1)
+    
+    def _generate_input_template(self, symbol: str, pre_calc: Dict, market_params: Dict) -> str:
+        """
+        生成输入文件模板（从 agent3_schema 自动生成）
+        
+        Args:
+            symbol: 股票代码
+            pre_calc: 动态参数
+            market_params: 市场参数
+            
+        Returns:
+            生成的文件路径
+        """
+        from schemas.agent3_schema import get_schema
+        
+        # 创建目录
+        input_dir = Path("data/input")
+        input_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 生成文件名: symbol_datetime.json
+        current_datetime = datetime.now().strftime("%Y%m%d")
+        filename = f"{symbol.lower()}_{current_datetime}.json"
+        filepath = input_dir / filename
+        
+        # 从 schema 自动生成 spec 结构
+        schema = get_schema()
+        spec_template = self._build_template_from_schema(schema, symbol)
+        
+        # 构造完整模板
+        template = {
+            "spec": spec_template,
+            "metadata": {
+                "as_of": datetime.now().strftime("%Y-%m-%d"),
+                "strikes": pre_calc.get('dyn_strikes'),
+                "panels": [
+                    {
+                        "panel_name": "short",
+                        "horizon_arg": pre_calc.get('dyn_dte_short'),
+                        "rows": []
+                    },
+                    {
+                        "panel_name": "mid",
+                        "horizon_arg": pre_calc.get('dyn_dte_mid'),
+                        "rows": []
+                    },
+                    {
+                        "panel_name": "long",
+                        "horizon_arg": pre_calc.get('dyn_dte_long_backup'),
+                        "rows": []
+                    }
+                ]
+            }
+        }
+        
+        # 写入文件
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(template, f, indent=2, ensure_ascii=False)
+        
+        return str(filepath)
+    
+    def _build_template_from_schema(self, schema: Dict, symbol: str = None) -> Dict:
+        """
+        根据 JSON Schema 递归构建模板
+        
+        Args:
+            schema: JSON Schema 定义
+            symbol: 股票代码（用于填充 targets.symbol）
+            
+        Returns:
+            模板数据结构
+        """
+        schema_type = schema.get("type")
+        
+        # 处理对象类型
+        if schema_type == "object":
+            result = {}
+            properties = schema.get("properties", {})
+            pattern_properties = schema.get("patternProperties", {})
+            
+            # 处理普通属性
+            for prop_name, prop_schema in properties.items():
+                # 特殊处理：为 targets.symbol 填充实际值
+                if prop_name == "symbol" and symbol:
+                    result[prop_name] = symbol.upper()
+                else:
+                    result[prop_name] = self._build_template_from_schema(prop_schema, symbol)
+            
+            # 处理 patternProperties (如 indices 的动态键)
+            if pattern_properties:
+                # indices 留空，由用户填充
+                pass
+            
+            return result
+        
+        # 处理数组类型
+        elif schema_type == "array":
+            # 返回空数组，由用户填充
+            return []
+        
+        # 处理字符串类型
+        elif schema_type == "string":
+            enum_values = schema.get("enum", [])
+            if enum_values:
+                # 如果有枚举值，选择第一个作为默认值或 N/A
+                return "N/A" if "N/A" in enum_values else enum_values[0]
+            return None
+        
+        # 处理数字类型
+        elif schema_type == "number":
+            return None
+        
+        # 处理联合类型 (如 ["string", "null"])
+        elif isinstance(schema_type, list):
+            # 优先使用非 null 的类型
+            for t in schema_type:
+                if t != "null":
+                    return self._build_template_from_schema({"type": t, **{k: v for k, v in schema.items() if k != "type"}}, symbol)
+            return None
+        
+        # 默认返回 None
+        return None
     
     def _full_analysis(
         self,
@@ -227,7 +345,7 @@ class AnalyzeCommand(BaseCommand):
         mode: str,
         cache: str,
         pre_calc: Dict,
-        market_params: Dict = None  #  新增参数
+        market_params: Dict = None
     ) -> Dict[str, Any]:
         """
         执行完整分析
@@ -241,14 +359,12 @@ class AnalyzeCommand(BaseCommand):
             pre_calc: 动态参数字典
             market_params: 市场参数（可选，用于保存到缓存）
         """
-        # 验证参数
         if mode == 'update' and not cache:
             self.print_error("update 模式必须指定 --cache 参数")
             self.console.print(f"[yellow]💡 示例:[/yellow]")
             self.console.print(f"[cyan]   python app.py analyze -s {symbol.upper()} -f {folder} --mode update --cache {symbol.upper()}_20251129.json[/cyan]")
             sys.exit(1)
         
-        # 验证缓存文件
         if cache:
             is_valid, error_msg, cache_info = self.validate_cache_file(cache, symbol)
             
@@ -260,7 +376,6 @@ class AnalyzeCommand(BaseCommand):
             self.console.print(f"\n[green]✅ 缓存文件验证通过[/green]")
             self.console.print(f"[dim]   将更新缓存: {cache}[/dim]")
         
-        # 打印标题
         mode_desc = "完整分析" if mode == "full" else "增量补齐"
         scenario = pre_calc.get('scenario', 'N/A')
         self.console.print(Panel.fit(
@@ -270,7 +385,6 @@ class AnalyzeCommand(BaseCommand):
             border_style="blue"
         ))
         
-        # 验证文件夹
         folder_path = Path(folder)
         is_valid, msg = self.validate_folder(folder_path)
         if not is_valid:
@@ -279,10 +393,8 @@ class AnalyzeCommand(BaseCommand):
         
         self.console.print(f"[dim]📂 {msg}[/dim]")
         
-        # 创建引擎
         engine = self.create_engine(cache_file=cache)
         
-        #  优先使用传入的 market_params，否则从 env_vars 获取
         if not market_params:
             market_params = self.env_vars.get('market_params', {})
         
@@ -296,18 +408,16 @@ class AnalyzeCommand(BaseCommand):
             ) as progress:
                 task = progress.add_task("正在分析...", total=None)
                 
-                #  传递市场参数和动态参数
                 result = engine.run(
                     symbol=symbol.upper(),
                     data_folder=folder_path,
                     mode=mode,
                     market_params=market_params,
-                    dyn_params=pre_calc  #  pre_calc 作为 dyn_params 传递
+                    dyn_params=pre_calc
                 )
                 
                 progress.update(task, completed=True)
             
-            # 处理结果
             return self._handle_result(result, symbol, output)
         
         except Exception as e:
@@ -334,7 +444,6 @@ class AnalyzeCommand(BaseCommand):
         elif status == "success":
             self.console.print("\n[green]✅ 分析完成![/green]\n")
             
-            # 保存报告
             if output:
                 output_path = Path(output)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -344,13 +453,11 @@ class AnalyzeCommand(BaseCommand):
                 
                 self.console.print(f"\n[dim]报告已保存至: {output_path}[/dim]")
             
-            #显示市场状态信息
             if "pre_calc" in result:
                 pre_calc = result["pre_calc"]
                 self.console.print(f"\n[cyan]📊 市场状态: {pre_calc.get('scenario')}[/cyan]")
                 self.console.print(f"[dim]   VRP={pre_calc.get('vrp', 0):.2f} | Strikes={pre_calc.get('dyn_strikes')} | DTE={pre_calc.get('dyn_dte_mid')}[/dim]")
             
-            # 显示事件风险
             event_risk = result.get("event_risk", {})
             if isinstance(event_risk, dict):
                 risk_level = event_risk.get("risk_level", "low")
