@@ -61,7 +61,8 @@ class WorkflowEngine:
             self._modes = {
                 "full": FullAnalysisMode(self),
                 "update": UpdateMode(self),
-                "refresh": RefreshMode(self)
+                "refresh": RefreshMode(self),
+                "refresh_file": RefreshMode(self)  # 文件模式使用同一个 RefreshMode
             }
         
         return self._modes
@@ -90,7 +91,8 @@ class WorkflowEngine:
         mode_desc = {
             "full": "完整分析",
             "update": "增量补齐",
-            "refresh": "刷新快照"
+            "refresh": "刷新快照",
+            "refresh_file": "刷新快照(文件模式)"
         }.get(mode, "完整分析")
         
         logger.info(f"🚀 开始{mode_desc} {symbol}")

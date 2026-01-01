@@ -54,7 +54,7 @@ class OptionsScoring:
     
     def get_dynamic_weights(self, ivr: float = None) -> Tuple[Dict[str, float], str, str]:
         if ivr is None:
-            ivr = self.market_params.get('ivr', 50.0)
+            ivr = self.market_params.get('ivr') or 50.0
         
         dw = self.dynamic_weights_config
         
@@ -397,7 +397,7 @@ class OptionsScoring:
         iv_score = scores['iv']['score']
         index_score = scores['index_consistency']['score']
         
-        ivr = self.market_params.get('ivr', 50.0)
+        ivr = self.market_params.get('ivr') or 50.0
         dynamic_weights, weight_regime, regime_description = self.get_dynamic_weights(ivr)
         
         index_weight = self.conf.weight_index_consistency

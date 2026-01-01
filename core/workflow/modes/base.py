@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from loguru import logger
+from rich.console import Console
 
 if TYPE_CHECKING:
     from core.workflow.engine import WorkflowEngine
@@ -28,6 +29,7 @@ class BaseMode(ABC):
         self.cache_manager = engine.cache_manager
         self.state_manager = engine.state_manager
         self.env_vars = engine.env_vars
+        self.console = Console()  # 添加 Rich Console 实例
     
     @abstractmethod
     def execute(self, symbol: str, data_folder: Path, state: Dict[str, Any]) -> Dict[str, Any]:

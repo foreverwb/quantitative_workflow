@@ -1,7 +1,8 @@
 """
-分析流程编排器 (v3.3 - Fix Circular Import)
+分析流程编排器 (v3.6 - Data Flow Fix)
 修复:
-1. 将 code_nodes 的导入延迟到方法内部，解决与 core/__init__.py 的循环引用问题
+1. [Critical] 确保 Agent 6 的策略数据被正确传递到 final_data，防止 analyze 结果为空
+2. [Typo] 修复之前版本可能存在的 contextport_link 拼写错误
 """
 
 import json
@@ -12,27 +13,17 @@ from loguru import logger
 import prompts
 import schemas
 from utils.console_printer import (
-    print_header,
-    print_step,
-    print_success,
-    print_error,
-    print_info,
-    print_report_link
+    print_header, print_step, print_success, print_error, print_info, print_report_link
 )
 from core.error_handler import ErrorHandler, WorkflowError, ErrorCategory, ErrorSeverity
+from code_nodes import strategy_calc_main, comparison_main
 
 class AnalysisPipeline:
-    """分析流程编排器（增强版）"""
     
     def __init__(
-        self, agent_executor, 
-        cache_manager, 
-        env_vars: Dict[str, Any],
-        enable_pretty_print: bool = True,
-        cache_file: str = None,
-        error_handler: ErrorHandler = None,
-        market_params: Dict = None,
-        dyn_params: Dict = None      
+        self, agent_executor, cache_manager, env_vars: Dict[str, Any],
+        enable_pretty_print: bool = True, cache_file: str = None,
+        error_handler: ErrorHandler = None, market_params: Dict = None, dyn_params: Dict = None      
     ):
         self.agent_executor = agent_executor
         self.cache_manager = cache_manager
@@ -44,15 +35,9 @@ class AnalysisPipeline:
         self.env_vars = env_vars
         
     def run(self, initial_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        运行完整流程
-        """
         if self.enable_pretty_print:
             symbol = initial_data.get("symbol", "UNKNOWN")
-            print_header(
-                f"期权策略分析流程 (Phase 3)",
-                f"标的: {symbol} | 完整分析模式"
-            )
+            print_header(f"期权策略分析流程 (Phase 3)", f"标的: {symbol} | 完整分析模式")
         
         context = {
             "initial_data": initial_data,
@@ -60,7 +45,6 @@ class AnalysisPipeline:
             "calculated_data": initial_data
         }
         
-        # 定义流程步骤
         steps = [
             ("事件检测", self._step_event_detection, "检测财报、FOMC 等重大事件"),
             ("评分计算", self._step_scoring, "计算四维评分（Gamma/Wall/Direction/IV）"),
@@ -74,313 +58,199 @@ class AnalysisPipeline:
         ]
         
         for i, (step_name, step_func, step_desc) in enumerate(steps, 1):
-            if self.enable_pretty_print:
-                print_step(i, len(steps), f"{step_name} - {step_desc}")
-            
+            if self.enable_pretty_print: print_step(i, len(steps), f"{step_name} - {step_desc}")
             logger.info(f"📍 Step {i}/{len(steps)}: {step_name}")
-            
             try:
-                if self.error_handler:
-                    self.error_handler.add_completed_step(f"Step {i}: {step_name} 开始")
-                
                 context = step_func(context)
-                
-                if self.error_handler:
-                    self.error_handler.add_completed_step(f"Step {i}: {step_name} 完成")
-                
-                if self.enable_pretty_print:
-                    print_success(f"{step_name} 完成")
-            
-            except WorkflowError as we:
-                if self.enable_pretty_print:
-                    print_error(f"{step_name} 失败", we.message)
-                logger.error(f"❌ Step {step_name} 失败: {we.message}")
-                if self.error_handler:
-                    return self.error_handler.handle_error(we)
-                return {"status": "error", "failed_step": step_name, "error": we.to_dict()}
-            
+                if self.enable_pretty_print: print_success(f"{step_name} 完成")
             except Exception as e:
                 import traceback
-                if self.enable_pretty_print:
-                    print_error(f"{step_name} 失败", str(e))
                 logger.error(f"❌ Step {step_name} 失败: {str(e)}\n{traceback.format_exc()}")
-                workflow_error = WorkflowError(
-                    message=f"未预期的错误: {str(e)}",
-                    severity=ErrorSeverity.CRITICAL,
-                    category=ErrorCategory.CODE_BUG,
-                    node_name=step_name,
-                    original_error=e
-                )
-                if self.error_handler:
-                    return self.error_handler.handle_error(workflow_error)
                 return {"status": "error", "failed_step": step_name, "error": str(e)}
         
-        if self.enable_pretty_print:
-            print_success("🎉 完整分析流程完成！")
-        
-        return {
-            "status": "success",
-            "report": context.get("final_report"),
-            "event_risk": context.get("event_result"),
-            "scoring": context.get("scoring_data"),
-            "scenario": context.get("scenario_result"),
-            "strategies": context.get("strategies_result"),
-            "comparison": context.get("comparison_data")
-        }
+        if self.enable_pretty_print: print_success("🎉 完整分析流程完成！")
+        return {"status": "success", "report": context.get("final_report")}
     
     def _step_event_detection(self, context: Dict) -> Dict:
-        """步骤1：事件检测"""
-        # [延迟导入]
         from code_nodes import event_detection_main
-        
-        result = self.agent_executor.execute_code_node(
-            node_name="事件检测",
-            func=event_detection_main,
-            description="检测财报、FOMC、OPEX 等事件",
-            user_query=f"分析 {context['symbol']}",
-            **self.env_vars
-        )
-        context["event_result"] = self._safe_parse_json(result)
+        res = self.agent_executor.execute_code_node("事件检测", event_detection_main, "检测事件", user_query=f"分析 {context['symbol']}", **self.env_vars)
+        context["event_result"] = self._safe_parse_json(res)
         return context
-    
-    def _step_scoring(self, context: Dict) -> Dict:
-        """步骤2：评分计算"""
-        # [延迟导入]
-        from code_nodes import scoring_main
-        
-        calculated_data = context["calculated_data"]
-        ta_score = calculated_data.get("technical_analysis", {}).get("ta_score", 0)
-        
-        result = self.agent_executor.execute_code_node(
-            node_name="评分计算",
-            func=scoring_main,
-            description="计算 Gamma Regime、破墙、方向、IV 四维评分",
-            agent3_output=calculated_data,
-            technical_score=ta_score,
-            **self.env_vars
-        )
-        context["scoring_data"] = self._safe_parse_json(result)
-        return context
-    
-    def _step_scenario(self, context: Dict) -> Dict:
-        """步骤3：场景分析"""
-        scoring_data = context["scoring_data"]
-        if "targets" not in scoring_data:
-            scoring_data["targets"] = context["calculated_data"].get("targets", {})
 
-        messages = [
-            {
-                "role": "system",
-                "content": prompts.agent5_scenario.get_system_prompt()
-            },
-            {
-                "role": "user",
-                "content": prompts.agent5_scenario.get_user_prompt(scoring_data)
-            }
-        ]
-        
-        response = self.agent_executor.execute_agent(
-            agent_name="agent5",
-            messages=messages,
-            json_schema=schemas.agent5_schema.get_schema(),
-            description="推演市场场景及微观物理属性"
-        )
-        context["scenario_result"] = self._safe_parse_json(response.get("content", {}))
+    def _step_scoring(self, context: Dict) -> Dict:
+        from code_nodes import scoring_main
+        calc = context["calculated_data"]
+        res = self.agent_executor.execute_code_node("评分计算", scoring_main, "计算评分", agent3_output=calc, technical_score=calc.get("technical_analysis", {}).get("ta_score", 0), **self.env_vars)
+        context["scoring_data"] = self._safe_parse_json(res)
         return context
-    
+
+    def _step_scenario(self, context: Dict) -> Dict:
+        scoring = context["scoring_data"]
+        if "targets" not in scoring: scoring["targets"] = context["calculated_data"].get("targets", {})
+        msgs = [{"role": "system", "content": prompts.agent5_scenario.get_system_prompt()}, {"role": "user", "content": prompts.agent5_scenario.get_user_prompt(scoring)}]
+        res = self.agent_executor.execute_agent("agent5", msgs, schemas.agent5_schema.get_schema(), "推演场景")
+        print(">>>>>>>>> agent_5 <<<<<<<<", '\n', res)
+        context["scenario_result"] = self._safe_parse_json(res.get("content", {}))
+        return context
+
     def _step_strategy_calc(self, context: Dict) -> Dict:
-        """步骤4：策略辅助计算"""
-        # [延迟导入]
-        from code_nodes import strategy_calc_main
-        
-        calculated_data = context["calculated_data"]
-        scenario_result = context["scenario_result"]
-        ta_score = calculated_data.get("technical_analysis", {}).get("ta_score", 0)
-        targets = calculated_data.get("targets", {})
-        
-        result = self.agent_executor.execute_code_node(
-            node_name="策略辅助",
-            func=strategy_calc_main,
-            description="计算行权价、DTE、RR、Pw 等策略参数",
-            agent3_output=targets,
-            agent5_output=scenario_result,
-            technical_score=ta_score,
-            **self.env_vars
-        )
-        context["strategy_calc_data"] = self._safe_parse_json(result)
+        res = self.agent_executor.execute_code_node("策略辅助", strategy_calc_main, "计算策略参数", agent3_output=context["calculated_data"].get("targets", {}), agent5_output=context["scenario_result"], technical_score=0, **self.env_vars)
+        print(">>>>>>>>> strategy_calc <<<<<<<<", '\n', res)
+        context["strategy_calc_data"] = self._safe_parse_json(res)
         return context
-    
+
     def _step_strategy(self, context: Dict) -> Dict:
-        """步骤5：策略生成"""
-        scenario_result = context["scenario_result"]
-        strategy_calc_data = context["strategy_calc_data"]
-        calculated_data = context["calculated_data"]
+        msgs = [{"role": "system", "content": prompts.agent6_strategy.get_system_prompt(self.env_vars)}, {"role": "user", "content": prompts.agent6_strategy.get_user_prompt({"content": context["scenario_result"]}, context["strategy_calc_data"], context["calculated_data"])}]
+        res = self.agent_executor.execute_agent("agent6", msgs, schemas.agent6_schema.get_schema(), "生成策略")
+        print(">>>>>>>>> agent_6 <<<<<<<<<<<", '\n', res)
         
-        messages = [
-            {
-                "role": "system",
-                "content": prompts.agent6_strategy.get_system_prompt(self.env_vars)
-            },
-            {
-                "role": "user",
-                "content": prompts.agent6_strategy.get_user_prompt(
-                    {"content": scenario_result},
-                    strategy_calc_data,
-                    calculated_data
-                )
-            }
-        ]
+        # [Fix] 增强解析逻辑
+        raw_content = res.get("content", {})
+        # [Bug Fix] 使用 ensure_strategies_key=True 确保返回标准格式
+        parsed = self._safe_parse_json(raw_content, ensure_strategies_key=True)
         
-        response = self.agent_executor.execute_agent(
-            agent_name="agent6",
-            messages=messages,
-            json_schema=schemas.agent6_schema.get_schema(),
-            description="基于蓝图生成高盈亏比策略"
-        )
-        context["strategies_result"] = self._safe_parse_json(response.get("content", {}))
+        # [Fix] 确保 strategies 字段存在且是列表
+        if "strategies" not in parsed or not isinstance(parsed.get("strategies"), list):
+            # 尝试从其他可能的键获取策略
+            strategies_found = []
+            for key in ["strategy", "recommendations", "suggested_strategies"]:
+                if key in parsed:
+                    val = parsed[key]
+                    strategies_found = val if isinstance(val, list) else [val]
+                    break
+            parsed["strategies"] = strategies_found
+        
+        context["strategies_result"] = parsed
+        
+        # [Log] 确认策略生成情况
+        strat_count = len(context["strategies_result"].get("strategies", []))
+        logger.info(f"Generated {strat_count} strategies")
+        if strat_count == 0:
+            logger.warning(f"[Warning] Agent6 返回的策略为空，原始内容: {str(raw_content)[:200]}...")
         return context
-    
+
     def _step_comparison(self, context: Dict) -> Dict:
-        """步骤6：策略对比"""
-        # [延迟导入]
-        from code_nodes import comparison_main
-        
-        strategies_result = context["strategies_result"]
-        scenario_result = context["scenario_result"]
-        strategy_calc_data = context["strategy_calc_data"]
-        
-        result = self.agent_executor.execute_code_node(
-            node_name="策略对比",
-            func=comparison_main,
-            description="Code 4 量化评分与排序",
-            strategies_output=strategies_result, # [修正] 适配 Code 4 main 签名
-            scenario_output=scenario_result,
-            agent3_output=strategy_calc_data,
-            **self.env_vars
-        )
-        context["comparison_data"] = self._safe_parse_json(result)
+        res = self.agent_executor.execute_code_node("策略对比", comparison_main, "策略评分", strategies_output=context["strategies_result"], scenario_output=context["scenario_result"], agent3_output=context["strategy_calc_data"], **self.env_vars)
+        context["comparison_data"] = self._safe_parse_json(res)
         return context
-    
+
     def _step_report(self, context: Dict) -> Dict:
-        """步骤8：生成报告"""
-        calculated_data = context["calculated_data"]
-        scenario_result = context["scenario_result"]
-        strategies_result = context["strategies_result"]
-        comparison_data = context["comparison_data"]
-        event_result = context["event_result"]
-        
-        messages = [
-            {
-                "role": "system",
-                "content": prompts.agent8_report.get_system_prompt()
-            },
-            {
-                "role": "user",
-                "content": prompts.agent8_report.get_user_prompt(
-                    agent3=calculated_data,
-                    agent5=scenario_result,
-                    agent6=strategies_result,
-                    code4=comparison_data,
-                    event={"result": json.dumps(event_result, ensure_ascii=False)}
-                )
-            }
-        ]
-        
-        response = self.agent_executor.execute_agent(
-            agent_name="agent8",
-            messages=messages,
-            description="生成结构化分析报告"
-        )
-        context["final_report"] = response.get("content", "")
+        msgs = [{"role": "system", "content": prompts.agent8_report.get_system_prompt()}, {"role": "user", "content": prompts.agent8_report.get_user_prompt(agent3=context["calculated_data"], agent5=context["scenario_result"], agent6=context["strategies_result"], code4=context["comparison_data"], event={"result": json.dumps(context["event_result"], ensure_ascii=False)}, strategy_calc=context["strategy_calc_data"])}]
+        res = self.agent_executor.execute_agent("agent8", msgs, description="生成报告")
+        context["final_report"] = res.get("content", "")
         return context
-    
+
     def _step_html_report(self, context: Dict) -> Dict:
-        """步骤9：生成 HTML 报告"""
-        # [延迟导入]
         from code_nodes import html_report_main
-        
         symbol = context["symbol"]
-        final_report = context.get("final_report", "")
-        calculated_data = context.get("calculated_data", {}) # [新增] 获取计算数据
+        targets = context.get("calculated_data", {}).get("targets", {})
+        
+        # [Critical] 显式构造 final_data，确保 strategies 被包含
+        strategies_result = context.get("strategies_result", {})
+        
+        final_data_payload = {
+            "targets": targets,
+            "report": context.get("final_report", ""),
+            "agent6_result": strategies_result,   # 核心策略
+            "strategies": strategies_result,      # [Fix] 添加 strategies 字段供 HTML 生成器多路径读取
+            "market_params": self.market_params,
+            "snapshot": {
+                "targets": targets,
+                "data": {
+                    "strategy_calc": context.get("strategy_calc_data", {}),
+                    "agent6_result": strategies_result
+                },
+                "meta": context.get("strategy_calc_data", {}).get("meta", {})
+            }
+        }
         
         start_date = None
         if self.cache_file:
             match = re.match(r'(\w+)_(\d{8})\.json', self.cache_file)
-            if match:
-                start_date = match.group(2)
+            if match: start_date = match.group(2)
         
         result = self.agent_executor.execute_code_node(
-            node_name="HTML报告生成",
-            func=html_report_main,
-            description="将 Markdown 报告转为 HTML 格式",
-            report_markdown=final_report,
-            symbol=symbol,
-            start_date=start_date,
-            current_data=calculated_data, # [关键修复] 传递当前数据以生成监控卡片
-            output_dir="data/output",
-            **self.env_vars
+            node_name="HTML报告生成", func=html_report_main, description="生成HTML",
+            symbol=symbol, final_data=final_data_payload, mode="full",
+            output_dir="data/output", start_date=start_date, **self.env_vars
         )
         
         context["html_report_result"] = result
         if result.get("status") == "success":
-            html_path = result.get("html_path", "")
-            if self.enable_pretty_print and html_path:
-                print_report_link(html_path, symbol)
-        
+            print_report_link(result['html_path'], symbol)
         return context
     
     def _step_save_results(self, context: Dict) -> Dict:
-        """步骤9：保存结果"""
         symbol = context["symbol"]
+        # 保存参数
+        if self.market_params:
+            self.cache_manager.save_market_params(symbol, self.market_params, self.dyn_params, self.cache_file)
         
-        if self.market_params and self.dyn_params:
-            self.cache_manager.save_market_params(
-                symbol=symbol,
-                market_params=self.market_params,
-                dyn_params=self.dyn_params,
-                cache_file=self.cache_file
-            )
-        
+        # [Critical] 确保传递 strategies 给 save_complete_analysis
         self.cache_manager.save_complete_analysis(
             symbol=symbol,
             initial_data=context["calculated_data"],
             scenario=context["scenario_result"],
-            strategies=context["strategies_result"],
+            strategies=context["strategies_result"], # 确保此字段非空
             ranking=context["comparison_data"],
             report=context["final_report"],
-            cache_file=getattr(self, 'cache_file', None),
-            market_params=self.market_params, 
-            dyn_params=self.dyn_params          
+            cache_file=self.cache_file,
+            market_params=self.market_params,
+            dyn_params=self.dyn_params
         )
-        
-        if self.enable_pretty_print:
-            print_info(f"分析结果已保存至缓存: {symbol}")
-        
-        logger.success(f"✅ 分析结果已保存至缓存: {symbol}")
+        if self.enable_pretty_print: print_info(f"分析结果已保存至缓存: {symbol}")
         return context
     
     @staticmethod
-    def _safe_parse_json(data: Any) -> Dict:
-        """安全解析数据为 dict"""
+    def _safe_parse_json(data: Any, ensure_strategies_key: bool = False) -> Dict:
+        """
+        安全解析 JSON 数据，处理各种边界情况
+        
+        支持的输入格式:
+        1. 已经是 dict 的数据
+        2. 包含 "result" 键的单一键字典
+        3. JSON 字符串
+        4. 带有 Markdown 代码块的 JSON 字符串
+        
+        Args:
+            data: 输入数据
+            ensure_strategies_key: 如果为True，确保返回结果包含strategies键
+        """
+        result = {}
+        
         if isinstance(data, dict):
+            # 处理 {"result": ...} 包装
             if "result" in data and len(data) == 1:
                 inner = data["result"]
-                if isinstance(inner, dict): return inner
-                elif isinstance(inner, str):
-                    try: return json.loads(inner)
-                    except: return {"raw": inner}
-            return data
+                if isinstance(inner, (dict, list)): 
+                    result = inner if isinstance(inner, dict) else {"strategies": inner}
+                elif isinstance(inner, str): 
+                    try: 
+                        result = json.loads(inner) 
+                    except: 
+                        result = {"raw": inner}
+                else:
+                    result = {}
+            else:
+                # [Fix] 如果字典为空，返回空字典而不是 None
+                result = data if data else {}
+        elif isinstance(data, str):
+            try: 
+                cleaned = data.strip().replace('```json','').replace('```','').strip()
+                parsed = json.loads(cleaned)
+                # [Fix] 确保返回的是字典
+                if isinstance(parsed, list):
+                    result = {"strategies": parsed}
+                else:
+                    result = parsed if isinstance(parsed, dict) else {"raw": parsed}
+            except: 
+                result = {"raw": data}
+        elif isinstance(data, list):
+            # [Fix] 如果是列表，包装成字典
+            result = {"strategies": data}
         
-        if isinstance(data, str):
-            clean_text = data.strip()
-            if clean_text.startswith("```json"): clean_text = clean_text[7:]
-            elif clean_text.startswith("```"): clean_text = clean_text[3:]
-            if clean_text.endswith("```"): clean_text = clean_text[:-3]
-            clean_text = clean_text.strip()
-            try:
-                parsed = json.loads(clean_text)
-                if isinstance(parsed, dict): return parsed
-            except: pass
-            return {"raw": data}
-        
-        return {}
+        # [Bug Fix] 确保策略数据包含 strategies 键
+        if ensure_strategies_key and "strategies" not in result:
+            result["strategies"] = []
+            
+        return result

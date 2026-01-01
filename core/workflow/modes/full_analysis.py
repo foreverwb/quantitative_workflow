@@ -217,7 +217,6 @@ class FullAnalysisMode(BaseMode):
             inputs=inputs,
             json_schema=schemas.agent3_schema.get_schema()
         )
-        print("------------> Agent3 source response <--------------", '\n',json.dumps(response, ensure_ascii=False))
         logger.debug(f"Agent3 原始响应: {json.dumps(response, ensure_ascii=False)[:500]}...")
         
         # 解析响应
@@ -278,47 +277,7 @@ class FullAnalysisMode(BaseMode):
             **self.env_vars
         )
         return result
-    
-    def _handle_incomplete_data(self, aggregated_result: Dict) -> Dict[str, Any]:
-        """
-        处理数据不完整的情况
-        
-        Args:
-            aggregated_result: 聚合结果
-            
-        Returns:
-            包含补齐指引的结果
-        """
-        return {
-            "status": "incomplete",
-            "guide": self._format_补齐指引(aggregated_result),
-            "missing_count": aggregated_result.get("missing_count"),
-            "raw_result": aggregated_result
-        }
-    
-    def _format_补齐指引(self, result: Dict) -> str:
-        """格式化补齐指引"""
-        return f"""
-==================================================
-📋 数据补齐指引 ({result.get('user_guide_progress', '0%')})
-==================================================
 
-{result.get('user_guide_summary', '')}
-
-🔴 必须补齐 (Critical):
-{result.get('user_guide_priority_critical', '无')}
-
-🟠 建议补齐 (High):
-{result.get('user_guide_priority_high', '无')}
-
-🟡 可选补齐 (Medium):
-{result.get('user_guide_priority_medium', '无')}
-
-📝 历史合并记录:
-{result.get('user_guide_merge_log', '')}
-
-👉 下一步: {result.get('user_guide_next_action', '')}
-"""
     
     def _run_full_pipeline(
         self, 

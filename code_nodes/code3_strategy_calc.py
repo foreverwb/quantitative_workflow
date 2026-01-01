@@ -1,9 +1,9 @@
 """
-Code 3: 策略计算引擎 (Swing 增强版 v2.2)
+Code 3: 策略计算引擎 (Swing 增强版 v3.0 - Phase 3 Final)
 变更：
-1. [夯实] 强制 R > 1.8 逻辑：Debit 策略优先，Credit 策略需深度虚值。
-2. [新增] SwingStrategyObject 对象，实现 Direction x Volatility 矩阵逻辑。
-3. [适配] 兼容英文 Enum (iv_path="Flat")
+1. [新增] Delta 维度支持 (delta_profile, delta_rationale)
+2. [增强] 基于 DEX Bias 和 Gamma Regime 的方向判定逻辑
+3. [夯实] 强制 R > 1.8 逻辑：Debit 策略优先
 """
 import json
 from typing import Dict, Any, Optional, Tuple
@@ -70,6 +70,9 @@ class SwingStrategyObject:
     entry_trigger: str
     invalidation_level: str
     target_level: str
+    # [Phase 3 新增字段]
+    delta_profile: str = "Neutral"
+    delta_rationale: str = ""
 
 @dataclass
 class StrategyOutput:
@@ -99,12 +102,15 @@ class StrategyCalculator:
 
     def _calc_weekly_friction(self, spot: float, gamma_metrics: Dict) -> Tuple[str, str]:
         # [适配] 支持 micro_structure 中的 nearby_peak
-        nearby_data = gamma_metrics.get('structural_peaks', {}).get('nearby_peak')
-        if not nearby_data:
-            # 兼容旧路径
-            weekly_peak = gamma_metrics.get('nearby_peak', {}).get('price')
+        # 优先读取 structural_peaks 下的嵌套结构 (Phase 3 Schema)
+        peaks = gamma_metrics.get('structural_peaks', {})
+        nearby_data = peaks.get('nearby_peak')
+        
+        if nearby_data:
+             weekly_peak = nearby_data.get('price')
         else:
-            weekly_peak = nearby_data.get('price')
+             # 回退兼容旧路径
+             weekly_peak = gamma_metrics.get('nearby_peak', {}).get('price')
 
         if not weekly_peak or spot == 0:
             return "Clear", "无周度结构阻挡"
@@ -151,6 +157,26 @@ class StrategyCalculator:
             flags.strategy_bias_reason = "Dealer Long Vega，放大波动"
             
         return flags
+
+    def _determine_delta_bias(self, directional: Dict, gamma_regime: str) -> Tuple[str, str]:
+        """[Phase 3 新增] 计算 Delta 偏好: Long / Short / Neutral"""
+        dex_bias = directional.get("dex_bias", "mixed")
+        dex_strength = directional.get("dex_bias_strength", "weak")
+        
+        # 1. 强 DEX 信号主导 (Dealer 库存倾向)
+        if dex_bias == "support" and dex_strength in ["strong", "medium"]:
+            return "Long Delta", "DEX强支撑 (Dealer做多库存)"
+        elif dex_bias == "resistance" and dex_strength in ["strong", "medium"]:
+            return "Short Delta", "DEX强阻力 (Dealer做空库存)"
+            
+        # 2. Gamma Regime 辅助
+        if gamma_regime == "below": # 负 Gamma 通常伴随动量
+            return "Short Delta", "负Gamma区域 (顺势做空)"
+        elif gamma_regime == "above":
+            # 正 Gamma 震荡偏多 (但可能是区间)
+            return "Neutral/Long Delta", "正Gamma震荡"
+            
+        return "Neutral Delta", "混合信号或无明显方向"
 
     def _enforce_edge(self, strategy_type: str, legs: Dict, width: float, cost: float, max_profit: float) -> Optional[Dict]:
         if cost <= 0 or width <= 0: return None
@@ -264,18 +290,19 @@ class StrategyCalculator:
             "meta": {"spot": spot, "em1": em1, "primary_scenario": scenario}
         }
 
-    def _synthesize_swing_strategy(self, spot: float, scenario: str, vol_metrics: Dict, strikes: Dict, micro: Dict) -> Optional[SwingStrategyObject]:
-        ivr = vol_metrics.get("market_snapshot", {}).get("ivr", 50)
+    def _synthesize_swing_strategy(self, spot: float, scenario: str, vol_metrics: Dict, strikes: Dict, micro: Dict, delta_bias: str, delta_note: str) -> Optional[SwingStrategyObject]:
+        ivr = vol_metrics.get("market_snapshot", {}).get("ivr") or 50
         is_high_vol = ivr > 50
         is_trend = "Trend" in scenario or "Breakout" in scenario
         is_range = "Range" in scenario or "Grind" in scenario
         is_bullish = "Bullish" in scenario or "Up" in scenario
+        is_delta_long = "Long Delta" in delta_bias  # [Phase 3] Delta 辅助判断
         
         strategy_obj = None
         
-        # 场景 1: Trend + Low Vol -> Debit Spread
-        if is_trend and not is_high_vol:
-            if is_bullish:
+        # 场景 1: Trend(Up) OR Long Delta + Low Vol -> Debit Call Spread
+        if (is_trend or is_delta_long) and not is_high_vol:
+            if is_bullish or is_delta_long:
                 width = strikes["bull_call_spread"]["width"]
                 cost_est = width * 0.30 
                 profit_est = width - cost_est
@@ -292,9 +319,13 @@ class StrategyCalculator:
                         rr_ratio=valid["rr_ratio"],
                         entry_trigger="Breakout",
                         invalidation_level=f"Spot < {spot * 0.98:.2f}",
-                        target_level=f"Target: {strikes['bull_call_spread']['short_call']}"
+                        target_level=f"Target: {strikes['bull_call_spread']['short_call']}",
+                        # [Phase 3] 注入 Delta 信息
+                        delta_profile="Long Delta",
+                        delta_rationale=f"{delta_note} + 低波动率优势"
                     )
         
+        # Fallback 策略
         if not strategy_obj and is_trend and is_bullish:
              width = strikes["bull_call_spread"]["width"]
              cost_est = width * 0.35 
@@ -312,7 +343,9 @@ class StrategyCalculator:
                      rr_ratio=valid["rr_ratio"],
                      entry_trigger="Breakout",
                      invalidation_level="Support Loss",
-                     target_level="Resistance"
+                     target_level="Resistance",
+                     delta_profile="Long Delta",
+                     delta_rationale="趋势跟踪 (Fallback)"
                  )
         return strategy_obj
 
@@ -324,7 +357,7 @@ class StrategyCalculator:
         direction = agent3_data.get("directional_metrics", {})
         vol_metrics = agent3_data.get("volatility_metrics", {})
         validation_raw = agent3_data.get("targets", {}).get("validation_metrics", {})
-        micro_structure = agent3_data.get("targets", {}).get("gamma_metrics", {}).get("micro_structure", {})
+        micro_structure = gamma.get("micro_structure", {})
         
         scenario = agent5_data.get("scenario_classification", {})
         primary_scenario = scenario.get("primary_scenario", "未知")
@@ -335,6 +368,9 @@ class StrategyCalculator:
         validation = self._process_validation(validation_raw, gamma, spot, primary_scenario)
         if validation.is_vetoed:
             return self._build_vetoed_result(validation, spot, em1, primary_scenario)
+        
+        # [Phase 3] 计算 Delta Bias
+        delta_bias, delta_note = self._determine_delta_bias(direction, gamma.get("spot_vs_trigger", "unknown"))
         
         strikes = self._calc_strikes(spot, em1, walls)
         dte = self._calc_dte(gamma.get("gap_distance_em1_multiple", 2.0),
@@ -357,7 +393,8 @@ class StrategyCalculator:
         # [变更] iv_path 默认值修正为 "Flat"
         pw_butterfly = self._calc_pw_butterfly(spot, spot, em1, direction.get("iv_path", "Flat"))
         
-        swing_strategy = self._synthesize_swing_strategy(spot, primary_scenario, vol_metrics, strikes, micro_structure)
+        # [Phase 3] 传递 delta_bias 和 delta_note 到策略合成
+        swing_strategy = self._synthesize_swing_strategy(spot, primary_scenario, vol_metrics, strikes, micro_structure, delta_bias, delta_note)
         
         return {
             "trade_status": "ACTIVE",
@@ -388,7 +425,9 @@ class StrategyCalculator:
                 "em1": em1,
                 "primary_scenario": primary_scenario,
                 "gamma_regime": self._safe_get(agent5_data, "gamma_regime", "spot_vs_trigger", default="unknown"),
-                "strategy_bias": validation.strategy_bias
+                "strategy_bias": validation.strategy_bias,
+                # [Phase 3] 输出 Delta 偏好
+                "delta_bias": delta_bias 
             }
         }
 

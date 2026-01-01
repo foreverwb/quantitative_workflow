@@ -1,9 +1,8 @@
 """
-Agent 5: Scenario Analysis Prompt (v3.1 - English/Phase 3)
+Agent 5: Scenario Analysis Prompt (v3.2 - Flow-Aware)
 Changes:
-1. Full English prompt for better logic adherence.
-2. deeply integrated 'Rigid/Brittle' wall physics.
-3. Max Pain gravity logic for Range scenarios.
+1. Added 'FLOW DYNAMICS' reasoning step (DEX/Vanna analysis).
+2. Integrated 'flow_quality' classification logic.
 """
 import json
 
@@ -31,9 +30,16 @@ Deduce 3-5 high-probability market scenarios based on multi-dimensional quantita
    - **Steep Smile**: OTM options are expensive. Short Vega strategies (like Naked Condors) are risky; Ratio Spreads are preferred.
    - **Max Pain**: In 'Range'/'Grind' scenarios, price tends to gravitate towards Max Pain.
 
+4. **FLOW DYNAMICS (New)**:
+   - Check `dex_bias` (Inventory) and `vanna_dir` (Mechanical Flow).
+   - **Organic**: Price moves WITH Dex Support (Real Demand).
+   - **Mechanical**: Price moves WITH Vanna Support (Dealer Hedging).
+   - **Divergent**: Price moves AGAINST Dex/Vanna (Hollow Move/Short Covering).
+
 **OUTPUT REQUIREMENTS**:
-- Use specific terms: "Rigid Wall", "Gamma Pinning", "Vol Dampening".
+- Use specific terms: "Rigid Wall", "Gamma Pinning", "Vol Dampening", "Inventory Support".
 - For Breakout scenarios, specify if it is a "Clean Break" (Brittle) or "Grind Break" (Rigid).
+- **Classify Flow Quality**: Organic / Mechanical_Vanna / Short_Covering / Divergent.
 
 Return strictly JSON format with `scenarios` array and `validation_summary`.
 """
@@ -56,17 +62,26 @@ def get_user_prompt(scoring_data: dict) -> str:
     
     # Extract Key Phase 3 Intel
     targets = data.get("targets", {})
-    micro = targets.get("gamma_metrics", {}).get("micro_structure", {})
+    gamma_metrics = targets.get("gamma_metrics", {})
+    micro = gamma_metrics.get("micro_structure", {})
     anchors = targets.get("sentiment_anchors", {})
+    
+    # Flow Data extraction
+    directional = targets.get("directional_metrics", {})
+    dex_bias = directional.get("dex_bias", "Unknown")
+    dex_strength = directional.get("dex_bias_strength", "Unknown")
+    vanna_dir = directional.get("vanna_dir", "Unknown")
     
     micro_hint = f"Wall Physics: {micro.get('wall_type', 'Unknown')}, Breakout Difficulty: {micro.get('breakout_difficulty', 'Unknown')}"
     anchor_hint = f"Sentiment Anchor (Max Pain): {anchors.get('max_pain', 'N/A')}"
+    flow_hint = f"Inventory: {dex_bias} ({dex_strength}), Mechanical Flow: {vanna_dir}"
     
     return f"""Analyze the market scenarios.
 
     ## PHASE 3 INTELLIGENCE
-    - **{micro_hint}**
-    - **{anchor_hint}**
+    - **Physics**: {micro_hint}
+    - **Flows**: {flow_hint}
+    - **Anchors**: {anchor_hint}
 
     ## SCORING DATA
     ```json
@@ -75,9 +90,12 @@ def get_user_prompt(scoring_data: dict) -> str:
     
     ## INSTRUCTIONS
     1. Generate 3-5 scenarios.
-    2. **IF Wall is 'Rigid'**: Increase probability of 'Pinning/Rejection'. Reduce 'Direct Breakout'.
-    3. **IF Wall is 'Brittle'**: Increase probability of 'Momentum Breakout'.
-    4. **IF Scenario is 'Range'**: Treat Max Pain as a magnetic target.
+    2. **Physics Check**: IF Wall is 'Rigid', increase probability of 'Pinning/Rejection'.
+    3. **Flow Check**: 
+       - IF Price Direction matches Inventory (DEX), mark as **Organic**.
+       - IF Price matches Vanna but not DEX, mark as **Mechanical_Vanna**.
+       - IF Price opposes Inventory, mark as **Divergent** (High Risk).
+    4. **Range Logic**: IF Scenario is 'Range', treat Max Pain as a magnetic target.
 
     Return JSON.
     """

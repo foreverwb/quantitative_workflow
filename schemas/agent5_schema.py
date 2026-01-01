@@ -1,9 +1,8 @@
 """
-Agent 5: 场景分析 Schema (v3.0 - Phase 3 Enhanced)
+Agent 5: 场景分析 Schema (v3.2 - Flow-Aware)
 
 变更:
-1. 新增 'physics_assessment' 字段，用于固化微观物理判断 (Rigid/Brittle)
-2. 兼容英文输出
+1. 在 physics_assessment 中增加 'flow_quality' 字段
 """
 
 def get_schema() -> dict:
@@ -12,7 +11,7 @@ def get_schema() -> dict:
         "type": "object",
         "required": [
             "gamma_regime",
-            "physics_assessment", # [新增] 物理属性评估
+            "physics_assessment", 
             "scoring",
             "scenario_classification",
             "scenarios",
@@ -30,15 +29,15 @@ def get_schema() -> dict:
                 }
             },
             
-            # [新增] Phase 3 核心：微观物理与共振评估
+            # [Phase 3 Enhanced] 微观物理与流向评估
             "physics_assessment": {
                 "type": "object",
-                "required": ["wall_nature", "breakout_probability", "resonance_check"],
+                "required": ["wall_nature", "breakout_probability", "resonance_check", "flow_quality"],
                 "properties": {
                     "wall_nature": {
                         "type": "string", 
                         "enum": ["Rigid", "Brittle", "Elastic", "Unknown"],
-                        "description": "墙体物理属性 (Rigid=Range, Brittle=Breakout)"
+                        "description": "墙体物理属性"
                     },
                     "breakout_probability": {
                         "type": "string",
@@ -48,6 +47,11 @@ def get_schema() -> dict:
                         "type": "string",
                         "enum": ["Resonance", "Friction", "Neutral"],
                         "description": "周度与月度结构的共振状态"
+                    },
+                    "flow_quality": {
+                        "type": "string",
+                        "enum": ["Organic", "Mechanical_Vanna", "Short_Covering", "Divergent", "Unknown"],
+                        "description": "资金流向质量: Organic(有量支持), Mechanical(Vanna推动), Divergent(背离)"
                     }
                 }
             },
